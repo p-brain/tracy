@@ -1,0 +1,144 @@
+Determining if the CL_VERSION_2_2 exist failed with the following output:
+Change Dir: C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_929f2 && [1/2] Building C object CMakeFiles\cmTC_929f2.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_929f2.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\PROFES~1\VC\Tools\MSVC\1427~1.291\bin\Hostx64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_929f2.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_929f2.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef CL_VERSION_2_2
+  return ((int*)(&CL_VERSION_2_2))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the CL_VERSION_2_1 exist failed with the following output:
+Change Dir: C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_81263 && [1/2] Building C object CMakeFiles\cmTC_81263.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_81263.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\PROFES~1\VC\Tools\MSVC\1427~1.291\bin\Hostx64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_81263.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_81263.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef CL_VERSION_2_1
+  return ((int*)(&CL_VERSION_2_1))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the CL_VERSION_2_0 exist failed with the following output:
+Change Dir: C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_dfb26 && [1/2] Building C object CMakeFiles\cmTC_dfb26.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_dfb26.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\PROFES~1\VC\Tools\MSVC\1427~1.291\bin\Hostx64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_dfb26.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_dfb26.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef CL_VERSION_2_0
+  return ((int*)(&CL_VERSION_2_0))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the CL_VERSION_1_2 exist failed with the following output:
+Change Dir: C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_f4db0 && [1/2] Building C object CMakeFiles\cmTC_f4db0.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_f4db0.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\PROFES~1\VC\Tools\MSVC\1427~1.291\bin\Hostx64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_f4db0.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_f4db0.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef CL_VERSION_1_2
+  return ((int*)(&CL_VERSION_1_2))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the CL_VERSION_1_1 exist failed with the following output:
+Change Dir: C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_a66be && [1/2] Building C object CMakeFiles\cmTC_a66be.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_a66be.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\PROFES~1\VC\Tools\MSVC\1427~1.291\bin\Hostx64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_a66be.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_a66be.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef CL_VERSION_1_1
+  return ((int*)(&CL_VERSION_1_1))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+Determining if the CL_VERSION_1_0 exist failed with the following output:
+Change Dir: C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp
+
+Run Build Command(s):C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe cmTC_c4915 && [1/2] Building C object CMakeFiles\cmTC_c4915.dir\CheckSymbolExists.c.obj
+FAILED: CMakeFiles/cmTC_c4915.dir/CheckSymbolExists.c.obj 
+C:\PROGRA~2\MICROS~1\2019\PROFES~1\VC\Tools\MSVC\1427~1.291\bin\Hostx64\x64\cl.exe  /nologo   /DWIN32 /D_WINDOWS /W3  /MDd /Zi /Ob0 /Od /RTC1 /showIncludes /FoCMakeFiles\cmTC_c4915.dir\CheckSymbolExists.c.obj /FdCMakeFiles\cmTC_c4915.dir\ /FS -c CheckSymbolExists.c
+CheckSymbolExists.c(2): fatal error C1083: Cannot open include file: 'OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h': No such file or directory
+ninja: build stopped: subcommand failed.
+
+
+File C:/dev/extern/tracy/examples/OpenCLVectorAdd/out/build/x64-Debug (default)/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <OpenCL_INCLUDE_DIR-NOTFOUND/CL/cl.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef CL_VERSION_1_0
+  return ((int*)(&CL_VERSION_1_0))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
