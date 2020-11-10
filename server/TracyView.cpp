@@ -1,5 +1,5 @@
 #ifdef _MSC_VER
-#  pragma warning( disable: 4267 )  // conversion from don't care to whatever, possible loss of data 
+#  pragma warning( disable: 4267 )  // conversion from don't care to whatever, possible loss of data
 #endif
 
 #ifdef __MINGW32__
@@ -14,6 +14,7 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <stddef.h>
 #include <stdlib.h>
 #include <time.h>
@@ -36,6 +37,7 @@
 #include "TracyPrint.hpp"
 #include "TracySort.hpp"
 #include "TracySourceView.hpp"
+#include "TracyStackFrames.hpp"
 #include "TracyView.hpp"
 
 #include "../imgui/imgui_internal.h"
@@ -54,24 +56,6 @@ namespace tracy
 {
 
 static double s_time = 0;
-
-constexpr const char* s_tracyStackFrames[] = {
-    "tracy::Callstack",
-    "tracy::Callstack(int)",
-    "tracy::GpuCtxScope::{ctor}",
-    "tracy::Profiler::SendCallstack",
-    "tracy::Profiler::SendCallstack(int)",
-    "tracy::Profiler::SendCallstack(int, unsigned long)",
-    "tracy::Profiler::MemAllocCallstack",
-    "tracy::Profiler::MemAllocCallstack(void const*, unsigned long, int)",
-    "tracy::Profiler::MemFreeCallstack",
-    "tracy::Profiler::MemFreeCallstack(void const*, int)",
-    "tracy::ScopedZone::{ctor}",
-    "tracy::ScopedZone::ScopedZone(tracy::SourceLocationData const*, int, bool)",
-    "tracy::CallTrace",
-    "tracy::Profiler::Message",
-    nullptr
-};
 
 constexpr const char* GpuContextNames[] = {
     "Invalid",
@@ -129,10 +113,11 @@ enum { MinFrameSize = 5 };
 
 static View* s_instance = nullptr;
 
-View::View( void(*cbMainThread)(std::function<void()>), const char* addr, int port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, GetWindowCallback gwcb )
+View::View( void(*cbMainThread)(std::function<void()>), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, GetWindowCallback gwcb )
     : m_worker( addr, port )
     , m_staticView( false )
     , m_viewMode( ViewMode::LastFrames )
+    , m_viewModeHeuristicTry( true )
     , m_forceConnectionPopup( true, true )
     , m_frames( nullptr )
     , m_messagesScrollBottom( true )
@@ -431,6 +416,135 @@ bool View::Draw()
             ImGui::SameLine();
             ImGui::TextDisabled( "(%s)", RealToString( data.thread ) );
         }
+        if( data.callstack != 0 )
+        {
+            if( ImGui::TreeNode( "Call stack" ) )
+            {
+                ImGui::BeginChild( "##callstackFailure", ImVec2( 1200, 500 ) );
+                const auto w = ImGui::GetWindowWidth();
+                ImGui::Columns( 4 );
+                ImGui::SetColumnWidth( 0, w * 0.05f );
+                ImGui::SetColumnWidth( 1, w * 0.425f );
+                ImGui::SetColumnWidth( 2, w * 0.425f );
+                ImGui::SetColumnWidth( 3, w * 0.1f );
+                ImGui::TextUnformatted( "Frame" );
+                ImGui::NextColumn();
+                ImGui::TextUnformatted( "Function" );
+                ImGui::SameLine();
+                s_instance->DrawHelpMarker( "Click on entry to copy it to clipboard." );
+                ImGui::NextColumn();
+                ImGui::TextUnformatted( "Location" );
+                ImGui::SameLine();
+                s_instance->DrawHelpMarker( "Click on entry to copy it to clipboard." );
+                ImGui::NextColumn();
+                ImGui::TextUnformatted( "Image" );
+                ImGui::NextColumn();
+
+                auto& cs = s_instance->m_worker.GetCallstack( data.callstack );
+                int fidx = 0;
+                int bidx = 0;
+                for( auto& entry : cs )
+                {
+                    auto frameData = s_instance->m_worker.GetCallstackFrame( entry );
+                    if( !frameData )
+                    {
+                        ImGui::Separator();
+                        ImGui::Text( "%i", fidx++ );
+                        ImGui::NextColumn();
+                        char buf[32];
+                        sprintf( buf, "%p", (void*)s_instance->m_worker.GetCanonicalPointer( entry ) );
+                        ImGui::TextUnformatted( buf );
+                        if( ImGui::IsItemClicked() )
+                        {
+                            ImGui::SetClipboardText( buf );
+                        }
+                        ImGui::NextColumn();
+                        ImGui::NextColumn();
+                        ImGui::NextColumn();
+                    }
+                    else
+                    {
+                        const auto fsz = frameData->size;
+                        for( uint8_t f=0; f<fsz; f++ )
+                        {
+                            const auto& frame = frameData->data[f];
+                            auto txt = s_instance->m_worker.GetString( frame.name );
+
+                            if( fidx == 0 && f != fsz-1 )
+                            {
+                                auto test = s_tracyStackFrames;
+                                bool match = false;
+                                do
+                                {
+                                    if( strcmp( txt, *test ) == 0 )
+                                    {
+                                        match = true;
+                                        break;
+                                    }
+                                }
+                                while( *++test );
+                                if( match ) continue;
+                            }
+
+                            bidx++;
+
+                            ImGui::Separator();
+                            if( f == fsz-1 )
+                            {
+                                ImGui::Text( "%i", fidx++ );
+                            }
+                            else
+                            {
+                                TextDisabledUnformatted( "inline" );
+                            }
+                            ImGui::NextColumn();
+                            {
+                                ImGui::PushTextWrapPos( 0.0f );
+                                if( txt[0] == '[' )
+                                {
+                                    TextDisabledUnformatted( txt );
+                                }
+                                else
+                                {
+                                    ImGui::TextUnformatted( txt );
+                                }
+                                ImGui::PopTextWrapPos();
+                            }
+                            if( ImGui::IsItemClicked() )
+                            {
+                                ImGui::SetClipboardText( txt );
+                            }
+                            ImGui::NextColumn();
+                            ImGui::PushTextWrapPos( 0.0f );
+                            txt = s_instance->m_worker.GetString( frame.file );
+                            if( frame.line == 0 )
+                            {
+                                TextDisabledUnformatted( txt );
+                            }
+                            else
+                            {
+                                ImGui::TextDisabled( "%s:%i", txt, frame.line );
+                            }
+                            if( ImGui::IsItemClicked() )
+                            {
+                                ImGui::SetClipboardText( txt );
+                            }
+                            ImGui::PopTextWrapPos();
+                            ImGui::NextColumn();
+                            if( frameData->imageName.Active() )
+                            {
+                                TextDisabledUnformatted( s_instance->m_worker.GetString( frameData->imageName ) );
+                            }
+                            ImGui::NextColumn();
+                        }
+                    }
+                }
+
+                ImGui::EndColumns();
+                ImGui::EndChild();
+                ImGui::TreePop();
+            }
+        }
         ImGui::Separator();
         if( ImGui::Button( "I understand" ) )
         {
@@ -582,6 +696,7 @@ bool View::DrawImpl()
                 if( m_viewMode != ViewMode::Paused )
                 {
                     m_viewMode = ViewMode::Paused;
+                    m_viewModeHeuristicTry = false;
                 }
                 else
                 {
@@ -606,6 +721,22 @@ bool View::DrawImpl()
                 m_viewMode = ViewMode::LastRange;
             }
             ImGui::EndPopup();
+        }
+        else if( m_viewModeHeuristicTry )
+        {
+            const auto lastTime = m_worker.GetLastTime();
+            if( lastTime > 5*1000*1000*1000ll )
+            {
+                if( m_viewMode == ViewMode::LastFrames && m_worker.GetFrameCount( *m_worker.GetFramesBase() ) <= 2 )
+                {
+                    m_viewMode = ViewMode::LastRange;
+                    ZoomToRange( lastTime - 5*1000*1000*1000ll, lastTime, false );
+                }
+                else
+                {
+                    m_viewModeHeuristicTry = false;
+                }
+            }
         }
     }
     else
@@ -1470,6 +1601,7 @@ void View::DrawFrames()
         if( IsMouseDragging( 1 ) )
         {
             m_viewMode = ViewMode::Paused;
+            m_viewModeHeuristicTry = false;
             const auto delta = GetMouseDragDelta( 1 ).x;
             if( abs( delta ) >= fwidth )
             {
@@ -1598,6 +1730,7 @@ void View::DrawFrames()
                     if( IsMouseClicked( 0 ) )
                     {
                         m_viewMode = ViewMode::Paused;
+                        m_viewModeHeuristicTry = false;
                         m_zoomAnim.active = false;
                         if( !m_playback.pause && m_playback.sync ) m_playback.pause = true;
                         m_vd.zvStart = m_worker.GetFrameBegin( *m_frames, sel );
@@ -1615,7 +1748,7 @@ void View::DrawFrames()
                 if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameBegin( *m_frames, sel ), m_worker.GetFrameEnd( *m_frames, sel + group - 1 ), true };
             }
 
-            if( m_viewMode == ViewMode::Paused && wheel != 0 )
+            if( ( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0 )
             {
                 const int pfwidth = GetFrameWidth( prevScale );
                 const int pgroup = GetFrameGroup( prevScale );
@@ -1971,6 +2104,7 @@ void View::HandleZoneViewMouse( int64_t timespan, const ImVec2& wpos, float w, d
     if( IsMouseDragging( 1 ) || hwheel_delta != 0 )
     {
         m_viewMode = ViewMode::Paused;
+        m_viewModeHeuristicTry = false;
         m_zoomAnim.active = false;
         if( !m_playback.pause && m_playback.sync ) m_playback.pause = true;
         const auto delta = GetMouseDragDelta( 1 );
@@ -2028,7 +2162,7 @@ void View::HandleZoneViewMouse( int64_t timespan, const ImVec2& wpos, float w, d
             t0 -= std::max( int64_t( 1 ), int64_t( p1 * 0.25 ) );
             t1 += std::max( int64_t( 1 ), int64_t( p2 * 0.25 ) );
         }
-        ZoomToRange( t0, t1, m_viewMode == ViewMode::Paused );
+        ZoomToRange( t0, t1, !m_worker.IsConnected() || m_viewMode == ViewMode::Paused );
     }
 }
 
@@ -2870,9 +3004,12 @@ void View::DrawZones()
         if( showFull )
         {
             const auto sampleOffset = offset;
-            if( m_vd.drawSamples && !v->samples.empty() )
+            const auto hasSamples = m_vd.drawSamples && !v->samples.empty();
+            const auto hasCtxSwitch = m_vd.drawContextSwitches && m_worker.GetContextSwitchData( v->id );
+
+            if( hasSamples )
             {
-                if( m_vd.drawContextSwitches )
+                if( hasCtxSwitch )
                 {
                     offset += round( ostep * 0.5f );
                 }
@@ -2883,7 +3020,7 @@ void View::DrawZones()
             }
 
             const auto ctxOffset = offset;
-            if( m_vd.drawContextSwitches ) offset += round( ostep * 0.75f );
+            if( hasCtxSwitch ) offset += round( ostep * 0.75f );
 
             if( m_vd.drawZones )
             {
@@ -2900,7 +3037,7 @@ void View::DrawZones()
                 offset += ostep * depth;
             }
 
-            if( m_vd.drawContextSwitches )
+            if( hasCtxSwitch )
             {
                 auto ctxSwitch = m_worker.GetContextSwitchData( v->id );
                 if( ctxSwitch )
@@ -2909,7 +3046,7 @@ void View::DrawZones()
                 }
             }
 
-            if( m_vd.drawSamples && !v->samples.empty() )
+            if( hasSamples )
             {
                 DrawSamples( v->samples, hover, pxns, int64_t( nspx ), wpos, sampleOffset );
             }
@@ -6020,9 +6157,9 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
 
                 if( v->type == PlotType::Memory )
                 {
-                    const auto& mem = m_worker.GetMemData();
+                    auto& mem = m_worker.GetMemoryNamed( v->name );
 
-                    if( m_memoryAllocInfoWindow >= 0 )
+                    if( m_memoryAllocInfoPool == v->name && m_memoryAllocInfoWindow >= 0 )
                     {
                         const auto& ev = mem.data[m_memoryAllocInfoWindow];
 
@@ -6034,7 +6171,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                         draw->AddRectFilled( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x2288DD88 );
                         draw->AddRect( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x4488DD88 );
                     }
-                    if( m_memoryAllocHover >= 0 && m_memoryAllocHover != m_memoryAllocInfoWindow )
+                    if( m_memoryAllocHover >= 0 && m_memoryAllocHoverPool == v->name && ( m_memoryAllocInfoPool != v->name || m_memoryAllocHover != m_memoryAllocInfoWindow ) )
                     {
                         const auto& ev = mem.data[m_memoryAllocHover];
 
@@ -6119,7 +6256,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                 {
                     const auto x = ( it->time.Val() - m_vd.zvStart ) * pxns;
                     const auto y = PlotHeight - ( it->val - min ) * revrange * PlotHeight;
-                    DrawPlotPoint( wpos, x, y, offset, 0xFF44DDDD, hover, false, it, 0, false, v->type, v->format, PlotHeight );
+                    DrawPlotPoint( wpos, x, y, offset, 0xFF44DDDD, hover, false, it, 0, false, v->type, v->format, PlotHeight, v->name );
                 }
 
                 auto prevx = it;
@@ -6142,7 +6279,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                     const auto rsz = std::distance( it, range );
                     if( rsz == 1 )
                     {
-                        DrawPlotPoint( wpos, x1, y1, offset, 0xFF44DDDD, hover, true, it, prevy->val, false, v->type, v->format, PlotHeight );
+                        DrawPlotPoint( wpos, x1, y1, offset, 0xFF44DDDD, hover, true, it, prevy->val, false, v->type, v->format, PlotHeight, v->name );
                         prevx = it;
                         prevy = it;
                         ++it;
@@ -6259,7 +6396,7 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
     }
 }
 
-void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem* item, double prev, bool merged, PlotType type, PlotValueFormatting format, float PlotHeight )
+void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem* item, double prev, bool merged, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name )
 {
     auto draw = ImGui::GetWindowDrawList();
     if( merged )
@@ -6301,7 +6438,7 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
 
             if( type == PlotType::Memory )
             {
-                auto& mem = m_worker.GetMemData();
+                auto& mem = m_worker.GetMemoryNamed( name );
                 const MemEvent* ev = nullptr;
                 if( change > 0 )
                 {
@@ -6363,9 +6500,11 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
 
                     m_memoryAllocHover = std::distance( mem.data.begin(), ev );
                     m_memoryAllocHoverWait = 2;
+                    m_memoryAllocHoverPool = name;
                     if( IsMouseClicked( 0 ) )
                     {
                         m_memoryAllocInfoWindow = m_memoryAllocHover;
+                        m_memoryAllocInfoPool = name;
                     }
                 }
             }
@@ -6967,7 +7106,8 @@ void View::DrawZoneInfoWindow()
                     ImGui::NextColumn();
                     ImGui::Separator();
                     const auto wrsz = eit - bit;
-                    ImGuiListClipper clipper( wrsz );
+                    ImGuiListClipper clipper;
+                    clipper.Begin( wrsz );
                     while( clipper.Step() )
                     {
                         for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -7061,11 +7201,32 @@ void View::DrawZoneInfoWindow()
         }
     }
 
-    auto& mem = m_worker.GetMemData();
-    if( !mem.data.empty() )
+    ImGui::Separator();
+    auto& memNameMap = m_worker.GetMemNameMap();
+    if( memNameMap.size() > 1 )
     {
-        ImGui::Separator();
-
+        ImGui::AlignTextToFramePadding();
+        TextDisabledUnformatted( ICON_FA_ARCHIVE " Memory pool:" );
+        ImGui::SameLine();
+        if( ImGui::BeginCombo( "##memoryPool", m_zoneInfoMemPool == 0 ? "Default allocator" : m_worker.GetString( m_zoneInfoMemPool ) ) )
+        {
+            for( auto& v : memNameMap )
+            {
+                if( ImGui::Selectable( v.first == 0 ? "Default allocator" : m_worker.GetString( v.first ) ) )
+                {
+                    m_zoneInfoMemPool = v.first;
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    auto& mem = m_worker.GetMemoryNamed( m_zoneInfoMemPool );
+    if( mem.data.empty() )
+    {
+        TextDisabledUnformatted( "No memory events." );
+    }
+    else
+    {
         if( !mem.plot )
         {
             ImGui::Text( "Please wait, computing data..." );
@@ -7170,7 +7331,7 @@ void View::DrawZoneInfoWindow()
 
                         ListMemData( v, []( auto v ) {
                             ImGui::Text( "0x%" PRIx64, v->Ptr() );
-                        }, nullptr, m_allocTimeRelativeToZone ? ev.Start() : -1 );
+                        }, nullptr, m_allocTimeRelativeToZone ? ev.Start() : -1, m_zoneInfoMemPool );
                         ImGui::TreePop();
                     }
                 }
@@ -7561,7 +7722,8 @@ void View::DrawZoneInfoChildren( const V& children, int64_t ztime )
 
                 pdqsort_branchless( cti.get(), cti.get() + cgr.v.size(), [&ctt] ( const auto& lhs, const auto& rhs ) { return ctt[lhs] > ctt[rhs]; } );
 
-                ImGuiListClipper clipper( cgr.v.size() );
+                ImGuiListClipper clipper;
+                clipper.Begin( cgr.v.size() );
                 while( clipper.Step() )
                 {
                     for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -7623,7 +7785,8 @@ void View::DrawZoneInfoChildren( const V& children, int64_t ztime )
         PrintStringPercent( buf, TimeToString( ztime - ctime ), double( ztime - ctime ) / ztime * 100 );
         ImGui::ProgressBar( double( ztime - ctime ) * rztime, ImVec2( -1, ty ), buf );
         ImGui::NextColumn();
-        ImGuiListClipper clipper( children.size() );
+        ImGuiListClipper clipper;
+        clipper.Begin( children.size() );
         while( clipper.Step() )
         {
             for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -8252,6 +8415,9 @@ void View::DrawOptions()
 
     int ival = m_vd.dynamicColors;
     ImGui::TextUnformatted( ICON_FA_PALETTE " Zone colors" );
+    ImGui::SameLine();
+    bool forceColors = m_vd.forceColors;
+    if( SmallCheckbox( "Ignore custom", &forceColors ) ) m_vd.forceColors = forceColors;
     ImGui::Indent();
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
     ImGui::RadioButton( "Static", &ival, 0 );
@@ -8959,7 +9125,8 @@ void View::DrawMessages()
     }
     else
     {
-        ImGuiListClipper clipper( m_msgList.size() );
+        ImGuiListClipper clipper;
+        clipper.Begin( m_msgList.size() );
         while( clipper.Step() )
         {
             for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -10650,7 +10817,8 @@ void View::DrawZoneList( const Vector<short_ptr<ZoneEvent>>& zones )
         }
     }
 
-    ImGuiListClipper clipper( zonesToIterate->size() );
+    ImGuiListClipper clipper;
+    clipper.Begin( zonesToIterate->size() );
     while( clipper.Step() )
     {
         for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -11774,34 +11942,16 @@ void View::DrawStatistics()
                 {
                     if( !filterActive )
                     {
-                        size_t cnt = 0;
-                        int64_t total = 0;
-                        int64_t selfTotal = 0;
-                        for( auto& v : it->second.zones )
+                        auto cit = m_statCache.find( it->first );
+                        if( cit != m_statCache.end() && cit->second.range == m_statRange && cit->second.sourceCount == it->second.zones.size() )
                         {
-                            auto& z = *v.Zone();
-                            const auto start = z.Start();
-                            const auto end = z.End();
-                            if( start >= min && end <= max )
+                            if( cit->second.count != 0 )
                             {
-                                const auto zt = end - start;
-                                total += zt;
-                                if( m_statSelf ) selfTotal += zt - GetZoneChildTimeFast( z );
-                                cnt++;
+                                slzcnt++;
+                                srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, cit->second.count, cit->second.total, cit->second.selfTotal } );
                             }
                         }
-                        if( cnt != 0 )
-                        {
-                            slzcnt++;
-                            srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, cnt, total, selfTotal } );
-                        }
-                    }
-                    else
-                    {
-                        slzcnt++;
-                        auto& sl = m_worker.GetSourceLocation( it->first );
-                        auto name = m_worker.GetString( sl.name.active ? sl.name : sl.function );
-                        if( m_statisticsFilter.PassFilter( name ) )
+                        else
                         {
                             size_t cnt = 0;
                             int64_t total = 0;
@@ -11821,7 +11971,50 @@ void View::DrawStatistics()
                             }
                             if( cnt != 0 )
                             {
+                                slzcnt++;
                                 srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, cnt, total, selfTotal } );
+                            }
+                            m_statCache[it->first] = StatisticsCache { RangeSlim { m_statRange.min, m_statRange.max, m_statRange.active }, it->second.zones.size(), cnt, total, selfTotal };
+                        }
+                    }
+                    else
+                    {
+                        slzcnt++;
+                        auto& sl = m_worker.GetSourceLocation( it->first );
+                        auto name = m_worker.GetString( sl.name.active ? sl.name : sl.function );
+                        if( m_statisticsFilter.PassFilter( name ) )
+                        {
+                            auto cit = m_statCache.find( it->first );
+                            if( cit != m_statCache.end() && cit->second.range == m_statRange && cit->second.sourceCount == it->second.zones.size() )
+                            {
+                                if( cit->second.count != 0 )
+                                {
+                                    srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, cit->second.count, cit->second.total, cit->second.selfTotal } );
+                                }
+                            }
+                            else
+                            {
+                                size_t cnt = 0;
+                                int64_t total = 0;
+                                int64_t selfTotal = 0;
+                                for( auto& v : it->second.zones )
+                                {
+                                    auto& z = *v.Zone();
+                                    const auto start = z.Start();
+                                    const auto end = z.End();
+                                    if( start >= min && end <= max )
+                                    {
+                                        const auto zt = end - start;
+                                        total += zt;
+                                        if( m_statSelf ) selfTotal += zt - GetZoneChildTimeFast( z );
+                                        cnt++;
+                                    }
+                                }
+                                if( cnt != 0 )
+                                {
+                                    srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, cnt, total, selfTotal } );
+                                }
+                                m_statCache[it->first] = StatisticsCache { RangeSlim { m_statRange.min, m_statRange.max, m_statRange.active }, it->second.zones.size(), cnt, total, selfTotal };
                             }
                         }
                     }
@@ -11933,6 +12126,7 @@ void View::DrawStatistics()
     }
 
     ImGui::Separator();
+    ImGui::AlignTextToFramePadding();
     TextDisabledUnformatted( "Filter results" );
     ImGui::SameLine();
     m_statisticsFilter.Draw( ICON_FA_FILTER "###resultFilter", 200 );
@@ -12365,7 +12559,7 @@ void View::DrawStatistics()
             ImGui::Separator();
 
             double revSampleCount100;
-            if( m_statRange.active )
+            if( m_statRange.active && m_worker.GetSamplingPeriod() != 0 )
             {
                 const auto st = m_statRange.max - m_statRange.min;
                 const auto cnt = st / m_worker.GetSamplingPeriod();
@@ -12762,6 +12956,80 @@ void View::DrawCallstackWindow()
     ImGui::SetNextWindowSize( ImVec2( 1400, 500 ), ImGuiCond_FirstUseEver );
     ImGui::Begin( "Call stack", &show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
+    auto& cs = m_worker.GetCallstack( m_callstackInfoWindow );
+    if( ClipboardButton() )
+    {
+        std::ostringstream s;
+        int fidx = 0;
+        int bidx = 0;
+        for( auto& entry : cs )
+        {
+            char buf[64*1024];
+            auto frameData = m_worker.GetCallstackFrame( entry );
+            if( !frameData )
+            {
+                sprintf( buf, "%3i. %p\n", fidx++, (void*)m_worker.GetCanonicalPointer( entry ) );
+            }
+            else
+            {
+                auto ptr = buf;
+                const auto fsz = frameData->size;
+                for( uint8_t f=0; f<fsz; f++ )
+                {
+                    const auto& frame = frameData->data[f];
+                    auto txt = m_worker.GetString( frame.name );
+
+                    if( fidx == 0 && f != fsz-1 )
+                    {
+                        auto test = tracy::s_tracyStackFrames;
+                        bool match = false;
+                        do
+                        {
+                            if( strcmp( txt, *test ) == 0 )
+                            {
+                                match = true;
+                                break;
+                            }
+                        }
+                        while( *++test );
+                        if( match ) continue;
+                    }
+
+                    bidx++;
+
+                    if( f == fsz-1 )
+                    {
+                        ptr += sprintf( ptr, "%3i. ", fidx++ );
+                    }
+                    else
+                    {
+                        ptr += sprintf( ptr, "inl. " );
+                    }
+                    ptr += sprintf( ptr, "%s  ", txt );
+                    txt = m_worker.GetString( frame.file );
+                    if( frame.line == 0 )
+                    {
+                        ptr += sprintf( ptr, "(%s)", txt );
+                    }
+                    else
+                    {
+                        ptr += sprintf( ptr, "(%s:%" PRIu32 ")", txt, frame.line );
+                    }
+                    if( frameData->imageName.Active() )
+                    {
+                        ptr += sprintf( ptr, " %s\n", m_worker.GetString( frameData->imageName ) );
+                    }
+                    else
+                    {
+                        ptr += sprintf( ptr, "\n" );
+                    }
+                }
+            }
+            s << buf;
+        }
+        ImGui::SetClipboardText( s.str().c_str() );
+    }
+    ImGui::SameLine();
     ImGui::TextUnformatted( ICON_FA_AT " Frame location:" );
     ImGui::SameLine();
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
@@ -12773,7 +13041,6 @@ void View::DrawCallstackWindow()
     ImGui::SameLine();
     ImGui::RadioButton( "Symbol address", &m_showCallstackFrameAddress, 2 );
 
-    auto& cs = m_worker.GetCallstack( m_callstackInfoWindow );
     if( m_worker.AreCallstackSamplesReady() )
     {
         auto frame = m_worker.GetCallstackFrame( *cs.begin() );
@@ -13037,7 +13304,7 @@ void View::DrawMemoryAllocWindow()
     bool show = true;
     ImGui::Begin( "Memory allocation", &show, ImGuiWindowFlags_AlwaysAutoResize );
 
-    const auto& mem = m_worker.GetMemData();
+    const auto& mem = m_worker.GetMemoryNamed( m_memoryAllocInfoPool );
     const auto& ev = mem.data[m_memoryAllocInfoWindow];
     const auto tidAlloc = m_worker.DecompressThread( ev.ThreadAlloc() );
     const auto tidFree = m_worker.DecompressThread( ev.ThreadFree() );
@@ -13048,6 +13315,10 @@ void View::DrawMemoryAllocWindow()
         ZoomToRange( ev.TimeAlloc(), ev.TimeFree() >= 0 ? ev.TimeFree() : m_worker.GetLastTime() );
     }
 
+    if( m_worker.GetMemNameMap().size() > 1 )
+    {
+        TextFocused( ICON_FA_ARCHIVE " Pool:", m_memoryAllocInfoPool == 0 ? "Default allocator" : m_worker.GetString( m_memoryAllocInfoPool ) );
+    }
     char buf[64];
     sprintf( buf, "0x%" PRIx64, ev.Ptr() );
     TextFocused( "Address:", buf );
@@ -13247,7 +13518,11 @@ void View::DrawInfo()
             ImGui::TextUnformatted( "Automated Tracy plots" );
             ImGui::EndTooltip();
         }
-        TextFocused( "Memory allocations:", RealToString( m_worker.GetMemData().data.size() ) );
+        auto& memNameMap = m_worker.GetMemNameMap();
+        TextFocused( "Memory pools:", RealToString( memNameMap.size() ) );
+        uint64_t memTotalCnt = 0;
+        for( auto v : memNameMap ) memTotalCnt += v.second->data.size();
+        TextFocused( "Memory allocations:", RealToString( memTotalCnt ) );
         TextFocused( "Source locations:", RealToString( m_worker.GetSrcLocCount() ) );
         TextFocused( "Strings:", RealToString( m_worker.GetStringsCount() ) );
         TextFocused( "Symbols:", RealToString( m_worker.GetSymbolsCount() ) );
@@ -14269,6 +14544,7 @@ void View::DrawPlayback()
             m_vd.zvStart = tstart;
             m_vd.zvEnd = end;
             m_viewMode = ViewMode::Paused;
+            m_viewModeHeuristicTry = false;
         }
     }
 
@@ -14372,6 +14648,7 @@ void View::DrawPlayback()
             m_vd.zvEnd = m_worker.GetFrameEnd( *frameSet, fi->frameRef );
             m_zoomAnim.active = false;
             m_viewMode = ViewMode::Paused;
+            m_viewModeHeuristicTry = false;
         }
     }
     ImGui::SameLine();
@@ -15073,7 +15350,7 @@ void View::DrawRangeEntry( Range& range, const char* label, uint32_t color, cons
     }
 }
 
-void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(const MemEvent*)> DrawAddress, const char* id, int64_t startTime )
+void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(const MemEvent*)> DrawAddress, const char* id, int64_t startTime, uint64_t pool )
 {
     if( startTime == -1 ) startTime = 0;
 
@@ -15121,7 +15398,7 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(co
     ImGui::NextColumn();
     ImGui::Separator();
 
-    const auto& mem = m_worker.GetMemData();
+    const auto& mem = m_worker.GetMemoryNamed( pool );
 
     switch( sortBy )
     {
@@ -15142,7 +15419,8 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(co
     }
 
     int idx = 0;
-    ImGuiListClipper clipper( vec.end() - vec.begin() );
+    ImGuiListClipper clipper;
+    clipper.Begin( vec.end() - vec.begin() );
     while( clipper.Step() )
     {
         for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -15150,7 +15428,7 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(co
             auto v = vec[i];
             const auto arrIdx = std::distance( mem.data.begin(), v );
 
-            if( m_memoryAllocInfoWindow == arrIdx )
+            if( m_memoryAllocInfoPool == pool && m_memoryAllocInfoWindow == arrIdx )
             {
                 ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.f, 0.f, 0.f, 1.f ) );
                 DrawAddress( v );
@@ -15162,6 +15440,7 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(co
                 if( ImGui::IsItemClicked() )
                 {
                     m_memoryAllocInfoWindow = arrIdx;
+                    m_memoryAllocInfoPool = pool;
                 }
             }
             if( ImGui::IsItemClicked( 2 ) )
@@ -15172,6 +15451,7 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, std::function<void(co
             {
                 m_memoryAllocHover = arrIdx;
                 m_memoryAllocHoverWait = 2;
+                m_memoryAllocHoverPool = pool;
             }
             ImGui::NextColumn();
             ImGui::TextUnformatted( MemSizeToString( v->Size() ) );
@@ -15609,7 +15889,7 @@ std::vector<MemoryPage> View::GetMemoryPages() const
 
     static unordered_flat_map<uint64_t, MemoryPage> memmap;
 
-    const auto& mem = m_worker.GetMemData();
+    const auto& mem = m_worker.GetMemoryNamed( m_memInfo.pool );
     const auto memlow = mem.low;
 
     if( m_memInfo.restrictTime )
@@ -15665,11 +15945,30 @@ std::vector<MemoryPage> View::GetMemoryPages() const
 
 void View::DrawMemory()
 {
-    auto& mem = m_worker.GetMemData();
-
     ImGui::SetNextWindowSize( ImVec2( 1100, 500 ), ImGuiCond_FirstUseEver );
     ImGui::Begin( "Memory", &m_memInfo.show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
+    auto& memNameMap = m_worker.GetMemNameMap();
+    if( memNameMap.size() > 1 )
+    {
+        TextDisabledUnformatted( ICON_FA_ARCHIVE " Memory pool:" );
+        ImGui::SameLine();
+        if( ImGui::BeginCombo( "##memoryPool", m_memInfo.pool == 0 ? "Default allocator" : m_worker.GetString( m_memInfo.pool ) ) )
+        {
+            for( auto& v : memNameMap )
+            {
+                if( ImGui::Selectable( v.first == 0 ? "Default allocator" : m_worker.GetString( v.first ) ) )
+                {
+                    m_memInfo.pool = v.first;
+                    m_memInfo.showAllocList = false;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::Separator();
+    }
+
+    auto& mem = m_worker.GetMemoryNamed( m_memInfo.pool );
     if( mem.data.empty() )
     {
         ImGui::TextWrapped( "No memory data collected." );
@@ -15757,7 +16056,7 @@ void View::DrawMemory()
                     {
                         ImGui::Text( "0x%" PRIx64 "+%" PRIu64, v->Ptr(), m_memInfo.ptrFind - v->Ptr() );
                     }
-                }, "##allocations" );
+                }, "##allocations", -1, m_memInfo.pool );
             }
         }
         ImGui::TreePop();
@@ -15802,7 +16101,7 @@ void View::DrawMemory()
         {
             ListMemData( items, []( auto v ) {
                 ImGui::Text( "0x%" PRIx64, v->Ptr() );
-            }, "##activeMem" );
+            }, "##activeMem", -1, m_memInfo.pool );
         }
         else
         {
@@ -15865,7 +16164,7 @@ void View::DrawMemory()
         ImGui::TreePop();
     }
 
-
+    ImGui::PushID( m_memInfo.pool );
     ImGui::Separator();
     if( ImGui::TreeNode( ICON_FA_ALIGN_JUSTIFY " Bottom-up call stack tree" ) )
     {
@@ -15882,9 +16181,7 @@ void View::DrawMemory()
         ImGui::SameLine();
         SmallCheckbox( "Only active allocations", &m_activeOnlyBottomUp );
 
-        auto& mem = m_worker.GetMemData();
         auto tree = GetCallstackFrameTreeBottomUp( mem );
-
         if( !tree.empty() )
         {
             int idx = 0;
@@ -15914,9 +16211,7 @@ void View::DrawMemory()
         ImGui::SameLine();
         SmallCheckbox( "Only active allocations", &m_activeOnlyTopDown );
 
-        auto& mem = m_worker.GetMemData();
         auto tree = GetCallstackFrameTreeTopDown( mem );
-
         if( !tree.empty() )
         {
             int idx = 0;
@@ -15929,6 +16224,7 @@ void View::DrawMemory()
 
         ImGui::TreePop();
     }
+    ImGui::PopID();
 
     ImGui::EndChild();
     ImGui::End();
@@ -15979,7 +16275,7 @@ void View::DrawFrameTreeLevel( const unordered_flat_map<uint64_t, CallstackFrame
 
             if( ImGui::IsItemClicked( 1 ) )
             {
-                auto& mem = m_worker.GetMemData().data;
+                auto& mem = m_worker.GetMemoryNamed( m_memInfo.pool ).data;
                 const auto sz = mem.size();
                 m_memInfo.showAllocList = true;
                 m_memInfo.allocList.clear();
@@ -16052,7 +16348,7 @@ void View::DrawFrameTreeLevel( const unordered_flat_map<uint64_t, CallstackFrame
 void View::DrawAllocList()
 {
     std::vector<const MemEvent*> data;
-    auto basePtr = m_worker.GetMemData().data.data();
+    auto basePtr = m_worker.GetMemoryNamed( m_memInfo.pool ).data.data();
     data.reserve( m_memInfo.allocList.size() );
     for( auto& idx : m_memInfo.allocList )
     {
@@ -16064,18 +16360,27 @@ void View::DrawAllocList()
     TextFocused( "Number of allocations:", RealToString( m_memInfo.allocList.size() ) );
     ListMemData( data, []( auto v ) {
         ImGui::Text( "0x%" PRIx64, v->Ptr() );
-    }, "##allocations" );
+    }, "##allocations", -1, m_memInfo.pool );
     ImGui::End();
 }
 
 const char* View::GetPlotName( const PlotData* plot ) const
 {
+    static char tmp[1024];
     switch( plot->type )
     {
     case PlotType::User:
         return m_worker.GetString( plot->name );
     case PlotType::Memory:
-        return ICON_FA_MEMORY " Memory usage";
+        if( plot->name == 0 )
+        {
+            return ICON_FA_MEMORY " Memory usage";
+        }
+        else
+        {
+            sprintf( tmp, ICON_FA_MEMORY " %s", m_worker.GetString( plot->name ) );
+            return tmp;
+        }
     case PlotType::SysTime:
         return ICON_FA_TACHOMETER_ALT " CPU usage";
     default:
@@ -16133,7 +16438,7 @@ uint32_t View::GetRawSrcLocColor( const SourceLocation& srcloc, int depth )
 uint32_t View::GetSrcLocColor( const SourceLocation& srcloc, int depth )
 {
     const auto color = srcloc.color;
-    if( color != 0 ) return color | 0xFF000000;
+    if( color != 0 && !m_vd.forceColors ) return color | 0xFF000000;
     if( m_vd.dynamicColors == 0 ) return 0xFFCC5555;
     return GetRawSrcLocColor( srcloc, depth );
 }
@@ -16143,7 +16448,7 @@ uint32_t View::GetRawZoneColor( const ZoneEvent& ev, uint64_t thread, int depth 
     const auto sl = ev.SrcLoc();
     const auto& srcloc = m_worker.GetSourceLocation( sl );
     const auto color = srcloc.color;
-    if( color != 0 ) return color | 0xFF000000;
+    if( color != 0 && !m_vd.forceColors ) return color | 0xFF000000;
     switch( m_vd.dynamicColors )
     {
     case 0:
@@ -16275,7 +16580,11 @@ void View::ZoomToRange( int64_t start, int64_t end, bool pause )
         end = start + 1;
     }
 
-    if( pause ) m_viewMode = ViewMode::Paused;
+    if( pause )
+    {
+        m_viewMode = ViewMode::Paused;
+        m_viewModeHeuristicTry = false;
+    }
     m_highlightZoom.active = false;
     if( !m_playback.pause && m_playback.sync ) m_playback.pause = true;
 
@@ -17093,7 +17402,7 @@ int64_t View::GetZoneChildTimeFast( const ZoneEvent& zone )
     return time;
 }
 
-int64_t View::GetZoneChildTimeFastClamped( const ZoneEvent& zone, uint64_t t0, uint64_t t1 )
+int64_t View::GetZoneChildTimeFastClamped( const ZoneEvent& zone, int64_t t0, int64_t t1 )
 {
     int64_t time = 0;
     if( zone.HasChildren() )
@@ -17108,8 +17417,8 @@ int64_t View::GetZoneChildTimeFastClamped( const ZoneEvent& zone, uint64_t t0, u
             if( it == zitend ) return 0;
             while( it < zitend )
             {
-                const auto c0 = std::max<uint64_t>( it->Start(), t0 );
-                const auto c1 = std::min<uint64_t>( it->End(), t1 );
+                const auto c0 = std::max<int64_t>( it->Start(), t0 );
+                const auto c1 = std::min<int64_t>( it->End(), t1 );
                 time += c1 - c0;
                 ++it;
             }
@@ -17122,8 +17431,8 @@ int64_t View::GetZoneChildTimeFastClamped( const ZoneEvent& zone, uint64_t t0, u
             if( it == zitend ) return 0;
             while( it < zitend )
             {
-                const auto c0 = std::max<uint64_t>( (*it)->Start(), t0 );
-                const auto c1 = std::min<uint64_t>( (*it)->End(), t1 );
+                const auto c0 = std::max<int64_t>( (*it)->Start(), t0 );
+                const auto c1 = std::min<int64_t>( (*it)->End(), t1 );
                 time += c1 - c0;
                 ++it;
             }

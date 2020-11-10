@@ -47,6 +47,7 @@ static constexpr MicroArchUx s_uArchUx[] = {
     { "Coffee Lake", "Core i7-8700K", "CFL" },
     { "Cannon Lake", "Core i3-8121U", "CNL" },
     { "Ice Lake", "Core i5-1035G1", "ICL" },
+    { "Cascade Lake", "Core i9-10980XE", "CLX" },
     { "AMD Zen+", "Ryzen 5 2600", "ZEN+" },
     { "AMD Zen 2", "Ryzen 7 3700X", "ZEN2" },
 };
@@ -322,7 +323,12 @@ static constexpr CpuIdMap s_cpuIdMap[] = {
     { PackCpuInfo( 0x870F10 ), "ZEN2" },
     { PackCpuInfo( 0x830F10 ), "ZEN2" },
     { PackCpuInfo( 0x860F01 ), "ZEN2" },
+    { PackCpuInfo( 0x860F81 ), "ZEN2" },
+    { PackCpuInfo( 0x890F00 ), "ZEN2" },
+    //{ PackCpuInfo( 0xA20F10 ), "ZEN3" },
     { PackCpuInfo( 0x0706E5 ), "ICL" },
+    { PackCpuInfo( 0x050656 ), "CLX" },
+    { PackCpuInfo( 0x050657 ), "CLX" },
     { PackCpuInfo( 0x060663 ), "CNL" },
     { PackCpuInfo( 0x0906EA ), "CFL" },
     { PackCpuInfo( 0x0906EB ), "CFL" },
@@ -488,6 +494,7 @@ void SourceView::ParseSource( const char* fileName, const Worker& worker, const 
                     auto end = txt;
                     while( *end != '\n' && *end != '\r' && end - m_data < sz ) end++;
                     m_lines.emplace_back( Line { txt, end, Tokenize( txt, end ) } );
+                    if( end - m_data == sz ) break;
                     if( *end == '\n' )
                     {
                         end++;
@@ -777,7 +784,7 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
             }
 #endif
 
-            const auto mLen = strlen( op.mnemonic );
+            const auto mLen = (int)strlen( op.mnemonic );
             if( mLen > mLenMax ) mLenMax = mLen;
             if( op.size > bytesMax ) bytesMax = op.size;
 
@@ -821,7 +828,7 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
             {
                 auto it = m_jumpTable.find( v.target );
                 assert( it != m_jumpTable.end() );
-                int level = 0;
+                size_t level = 0;
                 for(;;)
                 {
                     assert( levelRanges.size() >= level );
@@ -938,7 +945,8 @@ void SourceView::RenderSimpleSourceView()
     }
     else
     {
-        ImGuiListClipper clipper( (int)m_lines.size() );
+        ImGuiListClipper clipper;
+        clipper.Begin( (int)m_lines.size() );
         while( clipper.Step() )
         {
             for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
@@ -1512,7 +1520,8 @@ void SourceView::RenderSymbolSourceView( uint32_t iptotal, unordered_flat_map<ui
     }
     else
     {
-        ImGuiListClipper clipper( (int)m_lines.size() );
+        ImGuiListClipper clipper;
+        clipper.Begin( (int)m_lines.size() );
         while( clipper.Step() )
         {
             if( iptotal == 0 )
@@ -1786,7 +1795,8 @@ uint64_t SourceView::RenderSymbolAsmView( uint32_t iptotal, unordered_flat_map<u
     else
     {
         const auto th = (int)ImGui::GetTextLineHeightWithSpacing();
-        ImGuiListClipper clipper( (int)m_asm.size(), th );
+        ImGuiListClipper clipper;
+        clipper.Begin( (int)m_asm.size(), th );
         while( clipper.Step() )
         {
             assert( clipper.StepNo == 3 );
@@ -2063,7 +2073,7 @@ uint64_t SourceView::RenderSymbolAsmView( uint32_t iptotal, unordered_flat_map<u
             const auto x0 = rect.Min.x;
             const auto x1 = rect.Min.x + rect.GetWidth() * 0.2f;
             float sy;
-            for( size_t i=0; i<m_asm.size(); i++ )
+            for( int i=0; i<(int)m_asm.size(); i++ )
             {
                 if( i == m_asmSelected )
                 {
@@ -2627,6 +2637,7 @@ void SourceView::RenderAsmLine( AsmLine& line, uint32_t ipcnt, uint32_t iptotal,
         ImGui::SameLine( 0, ty );
     }
 
+    int opdesc = 0;
     const AsmVar* asmVar = nullptr;
     if( !m_atnt && ( m_cpuArch == CpuArchX64 || m_cpuArch == CpuArchX86 ) )
     {
@@ -2653,12 +2664,13 @@ void SourceView::RenderAsmLine( AsmLine& line, uint32_t ipcnt, uint32_t iptotal,
             if( oit != uarch->ops + uarch->numOps && (*oit)->id == opid )
             {
                 const auto& op = *oit;
+                opdesc = op->descId;
                 std::vector<std::pair<int, int>> res;
                 res.reserve( op->numVariants );
                 for( int i=0; i<op->numVariants; i++ )
                 {
                     const auto& var = *op->variant[i];
-                    if( var.descNum == line.params.size() )
+                    if( var.descNum == (int)line.params.size() )
                     {
                         int penalty = 0;
                         bool match = true;
@@ -2764,6 +2776,11 @@ void SourceView::RenderAsmLine( AsmLine& line, uint32_t ipcnt, uint32_t iptotal,
             const auto& var = *asmVar;
             if( m_font ) ImGui::PopFont();
             ImGui::BeginTooltip();
+            if( opdesc != 0 )
+            {
+                ImGui::TextUnformatted( OpDescList[opdesc] );
+                ImGui::Separator();
+            }
             TextFocused( "Throughput:", RealToString( var.tp ) );
             ImGui::SameLine();
             TextDisabledUnformatted( "(cycles per instruction, lower is better)" );
@@ -3315,7 +3332,7 @@ static bool TokenizeNumber( const char*& begin, const char* end )
         {
             isBinary = true;
             begin++;
-            while( begin < end && ( *begin == '0' || *begin == '1' ) || *begin == '\'' ) begin++;
+            while( begin < end && ( ( *begin == '0' || *begin == '1' ) || *begin == '\'' ) ) begin++;
         }
     }
     if( !isBinary )
@@ -3374,7 +3391,7 @@ SourceView::TokenColor SourceView::IdentifyToken( const char*& begin, const char
     {
         const char* tmp = begin;
         begin++;
-        while( begin < end && ( *begin >= 'a' && *begin <= 'z' ) || ( *begin >= 'A' && *begin <= 'Z' ) || ( *begin >= '0' && *begin <= '9' ) || *begin == '_' ) begin++;
+        while( begin < end && ( ( *begin >= 'a' && *begin <= 'z' ) || ( *begin >= 'A' && *begin <= 'Z' ) || ( *begin >= '0' && *begin <= '9' ) || *begin == '_' ) ) begin++;
         if( begin - tmp <= 24 )
         {
             char buf[25];
@@ -3542,7 +3559,7 @@ void SourceView::ResetAsm()
     for( auto& line : m_asm ) memset( line.regData, 0, sizeof( line.regData ) );
 }
 
-void SourceView::FollowRead( int line, RegsX86 reg, int limit )
+void SourceView::FollowRead( size_t line, RegsX86 reg, size_t limit )
 {
     if( limit == 0 ) return;
     const auto& data = m_asm[line];
@@ -3562,7 +3579,7 @@ void SourceView::FollowRead( int line, RegsX86 reg, int limit )
     }
 }
 
-void SourceView::FollowWrite( int line, RegsX86 reg, int limit )
+void SourceView::FollowWrite( size_t line, RegsX86 reg, size_t limit )
 {
     if( limit == 0 ) return;
     const auto& data = m_asm[line];
@@ -3577,14 +3594,15 @@ void SourceView::FollowWrite( int line, RegsX86 reg, int limit )
             CheckWrite( fit - m_asm.begin(), reg, limit );
         }
     }
-    if( line-1 >= 0 )
+    if( line > 0 )
     {
         CheckWrite( line-1, reg, limit );
     }
 }
 
-void SourceView::CheckRead( int line, RegsX86 reg, int limit )
+void SourceView::CheckRead( size_t line, RegsX86 reg, size_t limit )
 {
+    assert( limit > 0 );
     auto& data = m_asm[line];
     int idx = 0;
     for(;;)
@@ -3642,8 +3660,9 @@ void SourceView::CheckRead( int line, RegsX86 reg, int limit )
     }
 }
 
-void SourceView::CheckWrite( int line, RegsX86 reg, int limit )
+void SourceView::CheckWrite( size_t line, RegsX86 reg, size_t limit )
 {
+    assert( limit > 0 );
     auto& data = m_asm[line];
     int idx = 0;
     for(;;)

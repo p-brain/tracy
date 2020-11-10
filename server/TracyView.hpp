@@ -56,6 +56,15 @@ class View
         uint64_t count;
     };
 
+    struct StatisticsCache
+    {
+        RangeSlim range;
+        size_t sourceCount;
+        size_t count;
+        int64_t total;
+        int64_t selfTotal;
+    };
+
 public:
     struct VisData
     {
@@ -76,7 +85,7 @@ public:
     using GetWindowCallback = void*(*)();
 
     View( void(*cbMainThread)(std::function<void()>), ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr ) : View( cbMainThread, "127.0.0.1", 8086, fixedWidth, smallFont, bigFont, stcb, gwcb ) {}
-    View( void(*cbMainThread)(std::function<void()>), const char* addr, int port, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr );
+    View( void(*cbMainThread)(std::function<void()>), const char* addr, uint16_t port, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr );
     View( void(*cbMainThread)(std::function<void()>), FileRead& f, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr );
     ~View();
 
@@ -89,7 +98,7 @@ public:
 
     bool ReconnectRequested() const { return m_reconnectRequested; }
     std::string GetAddress() const { return m_worker.GetAddr(); }
-    int GetPort() const { return m_worker.GetPort(); }
+    uint16_t GetPort() const { return m_worker.GetPort(); }
 
     const char* SourceSubstitution( const char* srcFile ) const;
 
@@ -162,7 +171,7 @@ private:
     void DrawLockHeader( uint32_t id, const LockMap& lockmap, const SourceLocation& srcloc, bool hover, ImDrawList* draw, const ImVec2& wpos, float w, float ty, float offset, uint8_t tid );
     int DrawLocks( uint64_t tid, bool hover, double pxns, const ImVec2& wpos, int offset, LockHighlight& highlight, float yMin, float yMax );
     int DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, float yMin, float yMax );
-    void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem* item, double prev, bool merged, PlotType type, PlotValueFormatting format, float PlotHeight );
+    void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem* item, double prev, bool merged, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name );
     void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, double val, double prev, bool merged, PlotValueFormatting format, float PlotHeight );
     int DrawCpuData( int offset, double pxns, const ImVec2& wpos, bool hover, float yMin, float yMax );
     void DrawOptions();
@@ -186,7 +195,7 @@ private:
     void DrawRanges();
     void DrawRangeEntry( Range& range, const char* label, uint32_t color, const char* popupLabel, int id );
 
-    void ListMemData( std::vector<const MemEvent*>& vec, std::function<void(const MemEvent*)> DrawAddress, const char* id = nullptr, int64_t startTime = -1 );
+    void ListMemData( std::vector<const MemEvent*>& vec, std::function<void(const MemEvent*)> DrawAddress, const char* id = nullptr, int64_t startTime = -1, uint64_t pool = 0 );
 
     unordered_flat_map<uint32_t, PathData> GetCallstackPaths( const MemData& mem, bool onlyActive ) const;
     unordered_flat_map<uint64_t, CallstackFrameTree> GetCallstackFrameTreeBottomUp( const MemData& mem ) const;
@@ -259,7 +268,7 @@ private:
     int64_t GetZoneChildTime( const ZoneEvent& zone );
     int64_t GetZoneChildTime( const GpuEvent& zone );
     int64_t GetZoneChildTimeFast( const ZoneEvent& zone );
-    int64_t GetZoneChildTimeFastClamped( const ZoneEvent& zone, uint64_t t0, uint64_t t1 );
+    int64_t GetZoneChildTimeFastClamped( const ZoneEvent& zone, int64_t t0, int64_t t1 );
     int64_t GetZoneSelfTime( const ZoneEvent& zone );
     int64_t GetZoneSelfTime( const GpuEvent& zone );
     bool GetZoneRunningTime( const ContextSwitch* ctx, const ZoneEvent& ev, int64_t& time, uint64_t& cnt );
@@ -317,6 +326,7 @@ private:
     std::string m_filename;
     bool m_staticView;
     ViewMode m_viewMode;
+    bool m_viewModeHeuristicTry = false;
     DecayValue<bool> m_forceConnectionPopup = false;
 
     ViewData m_vd;
@@ -333,7 +343,9 @@ private:
     uint64_t m_gpuInfoWindowThread;
     uint32_t m_callstackInfoWindow = 0;
     int64_t m_memoryAllocInfoWindow = -1;
+    uint64_t m_memoryAllocInfoPool = 0;
     int64_t m_memoryAllocHover = -1;
+    uint64_t m_memoryAllocHoverPool = 0;
     int m_memoryAllocHoverWait = 0;
     const FrameData* m_frames;
     uint32_t m_lockInfoWindow = InvalidId;
@@ -397,6 +409,7 @@ private:
     bool m_allocTimeRelativeToZone = true;
     bool m_ctxSwitchTimeRelativeToZone = true;
     bool m_messageTimeRelativeToZone = true;
+    uint64_t m_zoneInfoMemPool = 0;
 
     ShortcutAction m_shortcut = ShortcutAction::None;
     Namespace m_namespace = Namespace::Short;
@@ -463,6 +476,8 @@ private:
 
     RangeSlim m_setRangePopup;
     bool m_setRangePopupOpen = false;
+
+    unordered_flat_map<int16_t, StatisticsCache> m_statCache;
 
     void(*m_cbMainThread)(std::function<void()>);
 
@@ -648,6 +663,7 @@ private:
         bool show = false;
         char pattern[1024] = {};
         uint64_t ptrFind = 0;
+        uint64_t pool = 0;
         bool restrictTime = false;
         bool showAllocList = false;
         std::vector<size_t> allocList;
