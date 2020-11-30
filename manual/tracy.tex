@@ -329,11 +329,9 @@ Tracy can be found at the following web addresses:
 \item Sponsoring development -- \url{https://github.com/sponsors/wolfpld/}
 \end{itemize}
 
-You may be also interested in a Bitbucket mirror: \url{https://bitbucket.org/wolfpld/tracy}.
-
 \subsubsection{Binary distribution}
 
-The version releases of the profiler are provided as precompiled Windows binaries to be downloaded at \url{https://github.com/wolfpld/tracy/releases}, along with the user manual.
+The version releases of the profiler are provided as precompiled Windows binaries to be downloaded at \url{https://github.com/wolfpld/tracy/releases}, along with the user manual. You will need to install the latest Visual C++ redistributable package to use them.
 
 Development builds of both Windows binaries and the user manual are provided as artifacts created by the automated Continuous Integration system on GitHub.
 
@@ -393,7 +391,10 @@ noborder=true,
 couleur=black!5,
 logo=\bcbombe
 ]{Important}
-Double-check that the define name is entered correctly (as \texttt{TRACY\_ENABLE}), don't make a mistake of adding an additional \texttt{D} at the end. Make sure that this macro is defined for all files across your project (e.g. it should be specified in the \texttt{CFLAGS} variable, which is always passed to the compiler, or in an equivalent way), and \emph{not} as a \texttt{\#define} in just some of the source files.
+\begin{itemize}
+\item Double-check that the define name is entered correctly (as \texttt{TRACY\_ENABLE}), don't make a mistake of adding an additional \texttt{D} at the end. Make sure that this macro is defined for all files across your project (e.g. it should be specified in the \texttt{CFLAGS} variable, which is always passed to the compiler, or in an equivalent way), and \emph{not} as a \texttt{\#define} in just some of the source files.
+\item The value of the define is not taken into consideration by Tracy, only the fact if the macro is defined, or not (unless specified otherwise). Be careful not to make a mistake of assigning numeric values to Tracy defines, which could lead you to being puzzled why constructs such as \texttt{TRACY\_ENABLE=0} don't work as you expect them to do.
+\end{itemize}
 \end{bclogo}
 
 The application you want to profile should be compiled with all the usual optimization options enabled (i.e.~make a release build). It makes no sense to profile debugging builds, as the unoptimized code and additional checks (asserts, etc.) completely change how the program behaves.
@@ -1026,7 +1027,7 @@ $2560\times1440$ & 23~FPS & 3300~FPS & 1600~FPS
 
 To record a zone's\footnote{A \texttt{zone} represents the lifetime of a special on-stack profiler variable. Typically it would exist for the duration of a whole scope of the profiled function, but you also can measure time spent in scopes of a for-loop, or an if-branch.} execution time add the \texttt{ZoneScoped} macro at the beginning of the scope you want to measure. This will automatically record function name, source file name and location. Optionally you may use the \texttt{ZoneScopedC(color)} macro to set a custom color for the zone. Note that the color value will be constant in the recording (don't try to parametrize it). You may also set a custom name for the zone, using the \texttt{ZoneScopedN(name)} macro. Color and name may be combined by using the \texttt{ZoneScopedNC(name, color)} macro.
 
-Use the \texttt{ZoneText(text, size)} macro to add a custom text string that will be displayed along the zone information (for example, name of the file you are opening). Multiple text strings can be attached to any single zone. If you want to send a numeric value and don't want to pay the cost of converting it to a string, you may use the \texttt{ZoneValue(uint64\_t)} macro.
+Use the \texttt{ZoneText(text, size)} macro to add a custom text string that will be displayed along the zone information (for example, name of the file you are opening). Multiple text strings can be attached to any single zone. The dynamic color of a zone can be specified with the \texttt{ZoneColor(uint32\_t)} macro to override the source location color. If you want to send a numeric value and don't want to pay the cost of converting it to a string, you may use the \texttt{ZoneValue(uint64\_t)} macro.
 
 If you want to set zone name on a per-call basis, you may do so using the \texttt{ZoneName(text, size)} macro. This name won't be used in the process of grouping the zones for statistical purposes (sections~\ref{statistics} and~\ref{findzone}).
 
@@ -1049,7 +1050,7 @@ The zone markup macros automatically report when they end, through the RAII mech
 
 Using the \texttt{ZoneScoped} family of macros creates a stack variable named \texttt{\_\_\_tracy\_scoped\_zone}. If you want to measure more than one zone in the same scope, you will need to use the \texttt{ZoneNamed} macros, which require that you provide a name for the created variable. For example, instead of \texttt{ZoneScopedN("Zone name")}, you would use \texttt{ZoneNamedN(variableName, "Zone name", true)}\footnote{The last parameter is explained in section~\ref{filteringzones}.}.
 
-The \texttt{ZoneText}, \texttt{ZoneValue} and \texttt{ZoneName} macros apply to the zones created using the \texttt{ZoneScoped} macros. For zones created using the \texttt{ZoneNamed} macros, you can use the \texttt{ZoneTextV(variableName, text, size)}, \texttt{ZoneValueV(variableName, uint64\_t)}, or \texttt{ZoneNameV(variableName, text, size)} macros, or invoke the methods \texttt{Text}, \texttt{Value} or \texttt{Name} directly on the variable you have created.
+The \texttt{ZoneText}, \texttt{ZoneColor}, \texttt{ZoneValue}, and \texttt{ZoneName} macros apply to the zones created using the \texttt{ZoneScoped} macros. For zones created using the \texttt{ZoneNamed} macros, you can use the \texttt{ZoneTextV(variableName, text, size)}, \texttt{ZoneColorV(variableName, uint32\_t)}, \texttt{ZoneValueV(variableName, uint64\_t)}, or \texttt{ZoneNameV(variableName, text, size)} macros, or invoke the methods \texttt{Text}, \texttt{Color}, \texttt{Value}, or \texttt{Name} directly on the variable you have created.
 
 Zone objects can't be moved or copied.
 
@@ -1654,7 +1655,9 @@ Using this functionality in a proper way can be quite tricky, as you also will n
 
 There is no explicit support for \texttt{realloc} function. You will need to handle it by marking memory allocations and frees, according to the system manual describing behavior of this routine.
 
-For more information refer to section~\ref{memoryprofiling}.
+Memory pools (section~\ref{memorypools}) are supported through macros with \texttt{N} postfix.
+
+For more information about memory profiling refer to section~\ref{memoryprofiling}.
 
 \subsubsection{Plots and messages}
 
@@ -1673,7 +1676,7 @@ Consult sections~\ref{plottingdata} and~\ref{messagelog} for more information.
 
 \subsubsection{Call stacks}
 
-You can collect call stacks of zones and memory allocation events, as described in section~\ref{collectingcallstacks}, by using the following \texttt{S} postfixed macros: \texttt{TracyCZoneS}, \texttt{TracyCZoneNS}, \texttt{TracyCZoneCS}, \texttt{TracyCZoneNCS}, \texttt{TracyCAllocS}, \texttt{TracyCFreeS}, \texttt{TracyCSecureAllocS}, \texttt{TracyCSecureFreeS}, \texttt{TracyCMessageS}, \texttt{TracyCMessageLS}, \texttt{TracyCMessageCS}, \texttt{TracyCMessageLCS}.
+You can collect call stacks of zones and memory allocation events, as described in section~\ref{collectingcallstacks}, by using macros with \texttt{S} postfix, such as: \texttt{TracyCZoneS}, \texttt{TracyCZoneNS}, \texttt{TracyCZoneCS}, \texttt{TracyCZoneNCS}, \texttt{TracyCAllocS}, \texttt{TracyCFreeS}, and so on.
 
 \subsubsection{Using the C API to implement bindings}
 \label{capibindings}
@@ -2341,13 +2344,15 @@ Frames from each frame set are displayed directly underneath the time scale. Eac
 \label{framesetsfig}
 \end{figure}
 
-On figure~\ref{framesetsfig} we can see the fully described frames~312 and 347. The description consists of the frame name, which is \emph{Frame} for the default frame set (section~\ref{markingframes}) or the name you used for the secondary name set (section~\ref{secondaryframeset}), the frame number and the frame time. The frame~348 is too small to be fully displayed, so only the frame time is shown. The frame~349 is even smaller, with no space for any text. Moreover, frames~313~to~346 are too small to be displayed individually, so they are replaced with a zig-zag pattern, as described in section~\ref{collapseditems}.
+On figure~\ref{framesetsfig} we can see the fully described frames~312 and 347. The description consists of the frame name, which is \emph{Frame} for the default frame set (section~\ref{markingframes}) or the name you used for the secondary name set (section~\ref{secondaryframeset}), the frame number and the frame time. Since frame~348 is too small to be fully labeled, only the frame time is shown. Frame~349 is even smaller, with no space for any text. Moreover, frames~313~to~346 are too small to be displayed individually, so they are replaced with a zig-zag pattern, as described in section~\ref{collapseditems}.
 
 You can also see that there are frame separators, projected down to the rest of the timeline view. Note that only the separators for the currently selected frame set are displayed. You can make a frame set active by clicking the \LMB{}~left mouse button on a frame set row you want to select (also see section~\ref{controlmenu}).
 
 Clicking the \MMB{} middle mouse button on a frame will zoom the view to the extent of the frame.
 
 If a frame has an associated frame image (see chapter~\ref{frameimages}), you can hold the \keys{\ctrl} key and click the \LMB{}~left mouse button on the frame, to open the frame image playback window (see chapter~\ref{playback}) and set the playback to the selected frame.
+
+If the \emph{\faFlagCheckered{}~Draw frame targets} option is enabled (see section~\ref{options}), time regions in frames exceeding the set target value will be marked with a red background.
 
 \paragraph{Zones, locks and plots display}
 \label{zoneslocksplots}
@@ -2600,6 +2605,7 @@ In this window you can set various trace-related options. The timeline view migh
 
 \begin{itemize}
 \item \emph{\faExpand{} Draw empty labels} -- By default threads that don't have anything to display at the current zoom level are hidden. Enabling this option will show them anyway.
+\item \emph{\faFlagCheckered{} Draw frame targets} -- If enabled, time regions in any frame from the currently selected frame set, which exceed the specified \emph{Target FPS} value will be marked with a red background on timeline view.
 \item \emph{\faHiking{} Draw context switches} -- Allows disabling context switch display in threads.
 \begin{itemize}
 \item \emph{\faMoon{} Darken inactive thread} -- If enabled, inactive regions in threads will be dimmed out.
@@ -3154,7 +3160,7 @@ If the listed assembly code targets x86 or x64 instruction set architectures, ho
 \item \emph{Ports} -- Which ports (execution units) are required for dispatch of microinstructions. For example, \texttt{2*p0+1*p015} would mean that out of the three microinstructions implementing the assembly instruction, two can only be executed on port 0, and one microinstruction can be executed on ports 0, 1, or 5. Number of available ports and their capabilities vary between different processors architectures. Refer to \url{https://wikichip.org/} for more information.
 \end{itemize}
 
-Selection of the CPU microarchitecture can be performed using the \emph{\faMicrochip{}~\textmu{}arch} drop-down. Each architecture is accompanied with a name of an example CPU implementing it.
+Selection of the CPU microarchitecture can be performed using the \emph{\faMicrochip{}~\textmu{}arch} drop-down. Each architecture is accompanied with a name of an example CPU implementing it. If the current selection matches the microarchitecture on which the profiled application was running on, the \faMicrochip{}~icon will be green\footnote{Comparing sampled instruction counts with microarchitectural details only makes sense when this selection is properly matched.}. Otherwise it will be red\footnote{This can be used to gain insight into how the code \emph{may} behave on other processors.}.
 
 Enabling the \emph{\faTruckLoading{}~Latency} option will display graphical representation of instruction latencies on the listing. Minimum latency of an instruction is represented with a red bar, while the maximum latency is represented by a yellow bar.
 

@@ -50,6 +50,7 @@ static constexpr MicroArchUx s_uArchUx[] = {
     { "Cascade Lake", "Core i9-10980XE", "CLX" },
     { "AMD Zen+", "Ryzen 5 2600", "ZEN+" },
     { "AMD Zen 2", "Ryzen 7 3700X", "ZEN2" },
+    { "AMD Zen 3", "Ryzen 9 5950X", "ZEN3" },
 };
 
 static constexpr const char* s_regNameX86[] = {
@@ -325,7 +326,7 @@ static constexpr CpuIdMap s_cpuIdMap[] = {
     { PackCpuInfo( 0x860F01 ), "ZEN2" },
     { PackCpuInfo( 0x860F81 ), "ZEN2" },
     { PackCpuInfo( 0x890F00 ), "ZEN2" },
-    //{ PackCpuInfo( 0xA20F10 ), "ZEN3" },
+    { PackCpuInfo( 0xA20F10 ), "ZEN3" },
     { PackCpuInfo( 0x0706E5 ), "ICL" },
     { PackCpuInfo( 0x050656 ), "CLX" },
     { PackCpuInfo( 0x050657 ), "CLX" },
@@ -386,11 +387,13 @@ void SourceView::SetCpuId( uint32_t cpuId )
         if( cpuId == ptr->cpuInfo )
         {
             SelectMicroArchitecture( ptr->moniker );
+            m_profileMicroArch = m_selMicroArch;
             return;
         }
         ptr++;
     }
     SelectMicroArchitecture( "ZEN2" );
+    m_profileMicroArch = -1;
 }
 
 void SourceView::OpenSource( const char* fileName, int line, const View& view, const Worker& worker )
@@ -1649,9 +1652,10 @@ void SourceView::RenderSymbolSourceView( uint32_t iptotal, unordered_flat_map<ui
     }
 }
 
-static int PrintHexBytes( char* buf, const uint8_t* bytes, size_t len )
+static constexpr char HexPrint[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+
+static int PrintHexBytesRaw( char* buf, const uint8_t* bytes, size_t len )
 {
-    static constexpr char HexPrint[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
     const auto start = buf;
     for( size_t i=0; i<len; i++ )
     {
@@ -1662,6 +1666,37 @@ static int PrintHexBytes( char* buf, const uint8_t* bytes, size_t len )
     }
     *--buf = '\0';
     return buf - start;
+}
+
+static int PrintHexBytesArm( char* buf, const uint8_t* bytes )
+{
+    const auto start = buf;
+    for( int i=3; i>=0; i-- )
+    {
+        const auto byte = bytes[i];
+        *buf++ = HexPrint[byte >> 4];
+        *buf++ = HexPrint[byte & 0xF];
+        *buf++ = ' ';
+    }
+    *--buf = '\0';
+    return buf - start;
+}
+
+static int PrintHexBytes( char* buf, const uint8_t* bytes, size_t len, CpuArchitecture arch )
+{
+    switch( arch )
+    {
+    case CpuArchX86:
+    case CpuArchX64:
+        return PrintHexBytesRaw( buf, bytes, len );
+    case CpuArchArm32:
+    case CpuArchArm64:
+        assert( len == 4 );
+        return PrintHexBytesArm( buf, bytes );
+    default:
+        assert( false );
+        return 0;
+    }
 }
 
 uint64_t SourceView::RenderSymbolAsmView( uint32_t iptotal, unordered_flat_map<uint64_t, uint32_t> ipcount, uint32_t ipmax, const Worker& worker, View& view )
@@ -1683,7 +1718,7 @@ uint64_t SourceView::RenderSymbolAsmView( uint32_t iptotal, unordered_flat_map<u
             auto bytesLeft = std::min( 16u, m_codeLen - m_disasmFail );
             auto code = worker.GetSymbolCode( m_baseAddr, m_codeLen );
             assert( code );
-            PrintHexBytes( tmp, (const uint8_t*)code, bytesLeft );
+            PrintHexBytesRaw( tmp, (const uint8_t*)code, bytesLeft );
             TextFocused( "Failure bytes:", tmp );
             TextDisabledUnformatted( "Click to copy to clipboard." );
             ImGui::EndTooltip();
@@ -1726,7 +1761,36 @@ uint64_t SourceView::RenderSymbolAsmView( uint32_t iptotal, unordered_flat_map<u
                 const auto w = ImGui::CalcTextSize( v.uArch ).x;
                 if( w > mw ) mw = w;
             }
-            ImGui::TextUnformatted( ICON_FA_MICROCHIP " \xce\xbc""arch:" );
+            if( m_selMicroArch == m_profileMicroArch )
+            {
+                TextColoredUnformatted( ImVec4( 0.4f, 0.8f, 0.4f, 1.f ), ICON_FA_MICROCHIP );
+                if( ImGui::IsItemHovered() )
+                {
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted( "Selected microarchitecture is the same as the profiled application was running on" );
+                    ImGui::EndTooltip();
+                }
+            }
+            else
+            {
+                TextColoredUnformatted( ImVec4( 1.f, 0.3f, 0.3f, 1.f ), ICON_FA_MICROCHIP );
+                if( ImGui::IsItemHovered() )
+                {
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted( "Selected microarchitecture does not match the one profiled application was running on" );
+                    if( m_profileMicroArch >= 0 )
+                    {
+                        ImGui::Text( "Measurements were performed on the %s microarchitecture", s_uArchUx[m_profileMicroArch].uArch );
+                    }
+                    else
+                    {
+                        ImGui::TextUnformatted( "Measurements were performed on an unknown microarchitecture" );
+                    }
+                    ImGui::EndTooltip();
+                }
+            }
+            ImGui::SameLine( 0, 0 );
+            ImGui::TextUnformatted( " \xce\xbc""arch:" );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( mw + ImGui::GetFontSize() );
             ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
@@ -2607,7 +2671,7 @@ void SourceView::RenderAsmLine( AsmLine& line, uint32_t ipcnt, uint32_t iptotal,
         auto code = (const uint8_t*)worker.GetSymbolCode( m_baseAddr, m_codeLen );
         assert( code );
         char tmp[64];
-        const auto len = PrintHexBytes( tmp, code + line.addr - m_baseAddr, line.len );
+        const auto len = PrintHexBytes( tmp, code + line.addr - m_baseAddr, line.len, worker.GetCpuArch() );
         ImGui::SameLine();
         TextColoredUnformatted( ImVec4( 0.5, 0.5, 1, 1 ), tmp );
         ImGui::SameLine( 0, 0 );

@@ -46,6 +46,15 @@
 #  include "../nfd/nfd.h"
 #endif
 
+#ifdef _WIN32
+#  include <windows.h>
+#elif defined __linux__
+#  include <sys/sysinfo.h>
+#elif defined __APPLE__ || defined BSD
+#  include <sys/types.h>
+#  include <sys/sysctl.h>
+#endif
+
 #include "IconsFontAwesome5.h"
 
 #ifndef M_PI_2
@@ -122,6 +131,7 @@ View::View( void(*cbMainThread)(std::function<void()>), const char* addr, uint16
     , m_frames( nullptr )
     , m_messagesScrollBottom( true )
     , m_reactToCrash( true )
+    , m_reactToLostConnection( true )
     , m_smallFont( smallFont )
     , m_bigFont( bigFont )
     , m_stcb( stcb )
@@ -132,6 +142,7 @@ View::View( void(*cbMainThread)(std::function<void()>), const char* addr, uint16
     assert( s_instance == nullptr );
     s_instance = this;
 
+    InitMemory();
     InitTextEditor( fixedWidth );
 }
 
@@ -155,6 +166,7 @@ View::View( void(*cbMainThread)(std::function<void()>), FileRead& f, ImFont* fix
     m_notificationTime = 4;
     m_notificationText = std::string( "Trace loaded in " ) + TimeToString( m_worker.GetLoadTime() );
 
+    InitMemory();
     InitTextEditor( fixedWidth );
     SetViewToLastFrames();
     m_userData.StateShouldBePreserved();
@@ -182,6 +194,32 @@ View::~View()
 
     assert( s_instance != nullptr );
     s_instance = nullptr;
+}
+
+void View::InitMemory()
+{
+#ifdef _WIN32
+    MEMORYSTATUSEX statex;
+    statex.dwLength = sizeof( statex );
+    GlobalMemoryStatusEx( &statex );
+    m_totalMemory = statex.ullTotalPhys;
+#elif defined __linux__
+    struct sysinfo sysInfo;
+    sysinfo( &sysInfo );
+    m_totalMemory = sysInfo.totalram;
+#elif defined __APPLE__
+    size_t memSize;
+    size_t sz = sizeof( memSize );
+    sysctlbyname( "hw.memsize", &memSize, &sz, nullptr, 0 );
+    m_totalMemory = memSize;
+#elif defined BSD
+    size_t memSize;
+    size_t sz = sizeof( memSize );
+    sysctlbyname( "hw.physmem", &memSize, &sz, nullptr, 0 );
+    m_totalMemory = memSize;
+#else
+    m_totalMemory = 0;
+#endif
 }
 
 void View::InitTextEditor( ImFont* font )
@@ -882,6 +920,19 @@ bool View::DrawImpl()
             ImGui::Text( "Profiler memory usage" );
             ImGui::EndTooltip();
         }
+        if( m_totalMemory != 0 )
+        {
+            ImGui::SameLine();
+            const auto memUse = float( memUsage ) / m_totalMemory * 100;
+            if( memUse < 80 )
+            {
+                ImGui::TextDisabled( "(%.2f%%)", memUse );
+            }
+            else
+            {
+                ImGui::TextColored( ImVec4( 1.f, 0.25f, 0.25f, 1.f ), "(%.2f%%)", memUse );
+            }
+        }
         ImGui::SameLine();
         dx = ImGui::GetCursorPosX() - cx;
         if( dx < targetLabelSize ) ImGui::SameLine( cx + targetLabelSize );
@@ -1067,6 +1118,27 @@ bool View::DrawImpl()
         ImGui::Separator();
         if( ImGui::Button( ICON_FA_MICROSCOPE " Focus" ) ) CenterAtTime( crash.time );
         ImGui::SameLine();
+        if( ImGui::Button( "Dismiss" ) ) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    if( m_reactToLostConnection && !m_worker.IsConnected() )
+    {
+        m_reactToLostConnection = false;
+        if( m_worker.GetSendInFlight() > 0 )
+        {
+            ImGui::OpenPopup( "Connection lost!" );
+        }
+    }
+    if( ImGui::BeginPopupModal( "Connection lost!", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+    {
+        TextCentered( ICON_FA_PLUG );
+        ImGui::TextUnformatted(
+            "Connection to the profiled application was lost\n"
+            "before all required profiling data could be retrieved.\n"
+            "This will result in missing source locations,\n"
+            "unresolved stack frames, etc." );
+        ImGui::Separator();
         if( ImGui::Button( "Dismiss" ) ) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -1295,10 +1367,11 @@ bool View::DrawConnection()
 {
     const auto ty = ImGui::GetFontSize();
     const auto cs = ty * 0.9f;
+    const auto isConnected = m_worker.IsConnected();
 
     {
         std::shared_lock<std::shared_mutex> lock( m_worker.GetMbpsDataLock() );
-        TextFocused( "Connected to:", m_worker.GetAddr().c_str() );
+        TextFocused( isConnected ? "Connected to:" : "Disconnected:", m_worker.GetAddr().c_str() );
         const auto& mbpsVector = m_worker.GetMbpsData();
         const auto mbps = mbpsVector.back();
         char buf[64];
@@ -1325,7 +1398,7 @@ bool View::DrawConnection()
     }
 
     const auto wpos = ImGui::GetWindowPos() + ImGui::GetWindowContentRegionMin();
-    ImGui::GetWindowDrawList()->AddCircleFilled( wpos + ImVec2( 1 + cs * 0.5, 3 + ty * 1.75 ), cs * 0.5, m_worker.IsConnected() ? 0xFF2222CC : 0xFF444444, 10 );
+    ImGui::GetWindowDrawList()->AddCircleFilled( wpos + ImVec2( 1 + cs * 0.5, 3 + ty * 1.75 ), cs * 0.5, isConnected ? 0xFF2222CC : 0xFF444444, 10 );
 
     {
         std::shared_lock<std::shared_mutex> lock( m_worker.GetDataLock() );
@@ -2379,6 +2452,7 @@ void View::DrawZoneFrames( const FrameData& frames )
     int64_t endPos = -1;
     bool tooltipDisplayed = false;
     const auto activeFrameSet = m_frames == &frames;
+    const int64_t frameTarget = ( activeFrameSet && m_vd.drawFrameTargets ) ? 1000000000ll / m_vd.frameTarget : std::numeric_limits<int64_t>::max();
 
     const auto inactiveColor = GetColorMuted( 0x888888, activeFrameSet );
     const auto activeColor = GetColorMuted( 0xFFFFFF, activeFrameSet );
@@ -2488,6 +2562,10 @@ void View::DrawZoneFrames( const FrameData& frames )
 
         if( activeFrameSet )
         {
+            if( fend - fbegin > frameTarget )
+            {
+                draw->AddRectFilled( wpos + ImVec2( ( fbegin + frameTarget - m_vd.zvStart ) * pxns, 0 ), wpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, wh ), 0x224444FF );
+            }
             if( fbegin >= m_vd.zvStart && endPos != fbegin )
             {
                 draw->AddLine( wpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, 0 ), wpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, wh ), 0x22FFFFFF );
@@ -3899,9 +3977,6 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
     const auto offset = _offset + ostep * depth;
     auto draw = ImGui::GetWindowDrawList();
 
-    const auto color = MixGhostColor( GetThreadColor( tid, depth ), 0x665555 );
-    const auto outline = HighlightColor( color );
-
     depth++;
     int maxdepth = depth;
 
@@ -3912,6 +3987,7 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
         const auto zsz = std::max( ( end - ev.start.Val() ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
+            const auto color = MixGhostColor( GetThreadColor( tid, depth ), 0x665555 );
             const auto px0 = ( ev.start.Val() - m_vd.zvStart ) * pxns;
             auto px1 = ( ev.end.Val() - m_vd.zvStart ) * pxns;
             auto rend = end;
@@ -3950,6 +4026,26 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
         {
             const auto& ghostKey = m_worker.GetGhostFrame( ev.frame );
             const auto frame = m_worker.GetCallstackFrame( ghostKey.frame );
+
+            uint32_t color;
+            if( m_vd.dynamicColors == 2 )
+            {
+                if( frame )
+                {
+                    const auto& sym = frame->data[ghostKey.inlineFrame];
+                    color = GetHsvColor( sym.name.Idx(), depth );
+                }
+                else
+                {
+                    color = GetHsvColor( ghostKey.frame.data, depth );
+                }
+            }
+            else
+            {
+                color = MixGhostColor( GetThreadColor( tid, depth ), 0x665555 );
+            }
+            const auto outline = HighlightColor( color );
+
             const auto pr0 = ( ev.start.Val() - m_vd.zvStart ) * pxns;
             const auto pr1 = ( ev.end.Val() - m_vd.zvStart ) * pxns;
             const auto px0 = std::max( pr0, -10.0 );
@@ -4013,12 +4109,18 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
                 const auto& sym = frame->data[ghostKey.inlineFrame];
                 const auto isInline = ghostKey.inlineFrame != frame->size-1;
                 const auto col = isInline ? DarkenColor( color ) : color;
-                const auto symName = m_worker.GetString( sym.name );
+                auto symName = m_worker.GetString( sym.name );
                 uint32_t txtColor = symName[0] == '[' ? 0xFF999999 : 0xFFFFFFFF;
-                const auto tsz = ImGui::CalcTextSize( symName );
+                auto tsz = ImGui::CalcTextSize( symName );
 
                 draw->AddRectFilled( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), col );
                 draw->AddRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), outline, 0.f, -1 );
+
+                if( tsz.x > zsz )
+                {
+                    symName = ShortenNamespace( symName );
+                    tsz = ImGui::CalcTextSize( symName );
+                }
 
                 if( tsz.x < zsz )
                 {
@@ -8261,6 +8363,18 @@ void View::DrawOptions()
     bool val = m_vd.drawEmptyLabels;
     ImGui::Checkbox( ICON_FA_EXPAND " Draw empty labels", &val );
     m_vd.drawEmptyLabels = val;
+    val = m_vd.drawFrameTargets;
+    ImGui::Checkbox( ICON_FA_FLAG_CHECKERED " Draw frame targets", &val );
+    m_vd.drawFrameTargets = val;
+    ImGui::Indent();
+    int tmp = m_vd.frameTarget;
+    ImGui::SetNextItemWidth( 120 );
+    if( ImGui::InputInt( "Target FPS", &tmp ) )
+    {
+        if( tmp < 1 ) tmp = 1;
+        m_vd.frameTarget = tmp;
+    }
+    ImGui::Unindent();
     if( m_worker.HasContextSwitches() )
     {
         ImGui::Separator();
@@ -12144,7 +12258,7 @@ void View::DrawStatistics()
         ImGui::SameLine();
         m_statisticsImageFilter.Draw( ICON_FA_FILTER "###imageFilter", 200 );
         ImGui::SameLine();
-        if( ImGui::Button( ICON_FA_BACKSPACE " Clear" ) )
+        if( ImGui::Button( ICON_FA_BACKSPACE " Clear###image" ) )
         {
             m_statisticsImageFilter.Clear();
         }
@@ -16447,8 +16561,16 @@ uint32_t View::GetRawZoneColor( const ZoneEvent& ev, uint64_t thread, int depth 
 {
     const auto sl = ev.SrcLoc();
     const auto& srcloc = m_worker.GetSourceLocation( sl );
-    const auto color = srcloc.color;
-    if( color != 0 && !m_vd.forceColors ) return color | 0xFF000000;
+    if( !m_vd.forceColors )
+    {
+        if( m_worker.HasZoneExtra( ev ) )
+        {
+            const auto custom_color = m_worker.GetZoneExtra( ev ).color.Val();
+            if( custom_color != 0 ) return custom_color | 0xFF000000;
+        }
+        const auto color = srcloc.color;
+        if( color != 0 ) return color | 0xFF000000;
+    }
     switch( m_vd.dynamicColors )
     {
     case 0:

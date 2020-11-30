@@ -9,10 +9,29 @@ a mistake.
 v0.x.x (xxxx-xx-xx)
 -------------------
 
+- More robust handling of system tracing on Android.
+- Added warning dialog when the connection is lost before all needed data
+  can be retrieved.
+- Dynamic zone colors are now supported through the ZoneColor() macro.
+- Fixed Arm machine code printout to match the one printed by objdump.
+
+
+v0.7.4 (2020-11-15)
+-------------------
+
 - Added support for user-provided locks to keep dbghelp calls thread-safe.
 - Call stacks can be now copied to clipboard.
 - Allow more control over which automated captures are performed.
-- Added descriptions for some assembly instructions.
+- Added textual descriptions for some assembly instructions.
+- Profiler memory usage is now also displayed as a percentage of available
+  physical memory.
+- Microarchitecture mismatch is now clearly displayed in the source view
+  window.
+- Added Zen 3 and Cascade Lake microarchitectural data.
+- Ghost zones are now supporting all zone coloring modes and namespace
+  shortening.
+- Extend C API to support memory pools.
+- Frame rate targets can be now visually represented on the timeline view.
 
 
 v0.7.3 (2020-10-06)

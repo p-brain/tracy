@@ -138,6 +138,7 @@ private:
         LastRange
     };
 
+    void InitMemory();
     void InitTextEditor( ImFont* font );
 
     const char* ShortenNamespace( const char* name ) const;
@@ -328,6 +329,7 @@ private:
     ViewMode m_viewMode;
     bool m_viewModeHeuristicTry = false;
     DecayValue<bool> m_forceConnectionPopup = false;
+    uint64_t m_totalMemory;
 
     ViewData m_vd;
 
@@ -363,6 +365,7 @@ private:
     DecayValue<uint64_t> m_drawThreadHighlight = 0;
     Annotation* m_selectedAnnotation = nullptr;
     bool m_reactToCrash = false;
+    bool m_reactToLostConnection = false;
 
     ImGuiTextFilter m_statisticsFilter;
     ImGuiTextFilter m_statisticsImageFilter;
