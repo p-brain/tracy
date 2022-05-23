@@ -1,6 +1,11 @@
 #ifndef __TRACY_HPP__
 #define __TRACY_HPP__
 
+#if ( !defined ( TRACY_EXPORTS ) && !defined(IS_TIER0_PERPROJECT) && !defined (IS_TIER0_PERPROJECT_STATICLINK) )
+#define TRACY_IMPORTS 1
+#endif
+
+
 #include "common/TracyColor.hpp"
 #include "common/TracySystem.hpp"
 
