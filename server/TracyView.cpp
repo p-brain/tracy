@@ -6716,6 +6716,9 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                     max++;
                 }
 
+                const auto rMin = min;
+                const auto rMax = max;
+
                 auto pvit = m_plotView.find( v );
                 if( pvit == m_plotView.end() )
                 {
@@ -6838,13 +6841,13 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                 if( yPos + ty >= yMin && yPos <= yMax )
                 {
                     char tmp[64];
-                    sprintf( tmp, "(y-range: %s, visible data points: %s)", FormatPlotValue( max - min, v->format ), RealToString( num ) );
+                    sprintf( tmp, "(y-range: %s, visible data points: %s)", FormatPlotValue( rMax - rMin, v->format ), RealToString( num ) );
                     draw->AddText( wpos + ImVec2( ty * 1.5f + txtx, offset - ty ), 0x8844DDDD, tmp );
                 }
-                auto tmp = FormatPlotValue( max, v->format );
+                auto tmp = FormatPlotValue( rMax, v->format );
                 DrawTextContrast( draw, wpos + ImVec2( 0, offset ), 0x8844DDDD, tmp );
                 offset += PlotHeight - ty;
-                tmp = FormatPlotValue( min, v->format );
+                tmp = FormatPlotValue( rMin, v->format );
                 DrawTextContrast( draw, wpos + ImVec2( 0, offset ), 0x8844DDDD, tmp );
 
                 DrawLine( draw, dpos + ImVec2( 0, offset + ty - 1 ), dpos + ImVec2( w, offset + ty - 1 ), 0x8844DDDD );
@@ -7471,7 +7474,7 @@ void View::DrawZoneInfoWindow()
             {
                 const auto end = m_worker.GetZoneEnd( ev );
                 auto eit = std::upper_bound( it, ctx->v.end(), end, [] ( const auto& l, const auto& r ) { return l < r.Start(); } );
-                bool incomplete = eit == ctx->v.end();
+                bool incomplete = eit == ctx->v.end() && !m_worker.IsThreadFiber( tid );
                 uint64_t cnt = std::distance( it, eit );
                 if( cnt == 1 )
                 {
@@ -17227,7 +17230,7 @@ static tracy_force_inline T* GetParentFrameTreeItemGroup( unordered_flat_map<uin
 }
 
 
-unordered_flat_map<uint32_t, View::MemPathData> View::GetCallstackPaths( const MemData& mem, bool onlyActive ) const
+unordered_flat_map<uint32_t, View::MemPathData> View::GetCallstackPaths( const MemData& mem, MemRange memRange ) const
 {
     unordered_flat_map<uint32_t, MemPathData> pathSum;
     pathSum.reserve( m_worker.GetCallstackPayloadCount() );
@@ -17238,13 +17241,13 @@ unordered_flat_map<uint32_t, View::MemPathData> View::GetCallstackPaths( const M
         if( it != mem.data.end() )
         {
             auto end = std::lower_bound( mem.data.begin(), mem.data.end(), m_memInfo.range.max, []( const auto& lhs, const auto& rhs ) { return lhs.TimeAlloc() < rhs; } );
-            if( onlyActive )
+            if( memRange != MemRange::Full )
             {
                 while( it != end )
                 {
                     auto& ev = *it++;
                     if( ev.CsAlloc() == 0 ) continue;
-                    if( ev.TimeFree() >= 0 && ev.TimeFree() < m_memInfo.range.max ) continue;
+                    if( ( memRange == MemRange::Inactive ) == ( ev.TimeFree() >= 0 && ev.TimeFree() < m_memInfo.range.max ) ) continue;
                     auto pit = pathSum.find( ev.CsAlloc() );
                     if( pit == pathSum.end() )
                     {
@@ -17279,12 +17282,12 @@ unordered_flat_map<uint32_t, View::MemPathData> View::GetCallstackPaths( const M
     }
     else
     {
-        if( onlyActive )
+        if( memRange != MemRange::Full )
         {
             for( auto& ev : mem.data )
             {
                 if( ev.CsAlloc() == 0 ) continue;
-                if( ev.TimeFree() >= 0 ) continue;
+                if( ( memRange == MemRange::Inactive ) == ( ev.TimeFree() >= 0 ) ) continue;
                 auto it = pathSum.find( ev.CsAlloc() );
                 if( it == pathSum.end() )
                 {
@@ -17321,7 +17324,7 @@ unordered_flat_map<uint32_t, View::MemPathData> View::GetCallstackPaths( const M
 unordered_flat_map<uint64_t, MemCallstackFrameTree> View::GetCallstackFrameTreeBottomUp( const MemData& mem ) const
 {
     unordered_flat_map<uint64_t, MemCallstackFrameTree> root;
-    auto pathSum = GetCallstackPaths( mem, m_activeOnlyBottomUp );
+    auto pathSum = GetCallstackPaths( mem, m_memRangeBottomUp );
     if( m_groupCallstackTreeByNameBottomUp )
     {
         for( auto& path : pathSum )
@@ -17451,7 +17454,7 @@ unordered_flat_map<uint64_t, CallstackFrameTree> View::GetParentsCallstackFrameT
 unordered_flat_map<uint64_t, MemCallstackFrameTree> View::GetCallstackFrameTreeTopDown( const MemData& mem ) const
 {
     unordered_flat_map<uint64_t, MemCallstackFrameTree> root;
-    auto pathSum = GetCallstackPaths( mem, m_activeOnlyTopDown );
+    auto pathSum = GetCallstackPaths( mem, m_memRangeTopDown );
     if( m_groupCallstackTreeByNameTopDown )
     {
         for( auto& path : pathSum )
@@ -18011,7 +18014,15 @@ void View::DrawMemory()
         ImGui::SameLine();
         ImGui::Spacing();
         ImGui::SameLine();
-        SmallCheckbox( "Only active allocations", &m_activeOnlyBottomUp );
+        bool activeOnlyBottomUp = m_memRangeBottomUp == MemRange::Active;
+        if( SmallCheckbox( "Only active allocations", &activeOnlyBottomUp ) )
+            m_memRangeBottomUp = activeOnlyBottomUp ? MemRange::Active : MemRange::Full;
+        ImGui::SameLine();
+        ImGui::Spacing();
+        ImGui::SameLine();
+        bool inactiveOnlyBottomUp = m_memRangeBottomUp == MemRange::Inactive;
+        if( SmallCheckbox( "Only inactive allocations", &inactiveOnlyBottomUp ) )
+            m_memRangeBottomUp = inactiveOnlyBottomUp ? MemRange::Inactive : MemRange::Full;
 
         auto tree = GetCallstackFrameTreeBottomUp( mem );
         if( !tree.empty() )
@@ -18041,7 +18052,15 @@ void View::DrawMemory()
         ImGui::SameLine();
         ImGui::Spacing();
         ImGui::SameLine();
-        SmallCheckbox( "Only active allocations", &m_activeOnlyTopDown );
+        bool activeOnlyTopDown = m_memRangeTopDown == MemRange::Active;
+        if( SmallCheckbox( "Only active allocations", &activeOnlyTopDown ) )
+            m_memRangeTopDown = activeOnlyTopDown ? MemRange::Active : MemRange::Full;
+        ImGui::SameLine();
+        ImGui::Spacing();
+        ImGui::SameLine();
+        bool inactiveOnlyTopDown = m_memRangeTopDown == MemRange::Inactive;
+        if( SmallCheckbox( "Only inactive allocations", &inactiveOnlyTopDown ) )
+            m_memRangeTopDown = inactiveOnlyTopDown ? MemRange::Inactive : MemRange::Full;
 
         auto tree = GetCallstackFrameTreeTopDown( mem );
         if( !tree.empty() )

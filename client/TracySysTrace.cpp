@@ -1111,8 +1111,8 @@ void SysTraceWorker( void* ptr )
     ThreadExitHandler threadExitHandler;
     SetThreadName( "Tracy Sampling" );
     InitRpmalloc();
-    sched_param sp = { 5 };
-    pthread_setschedparam( pthread_self(), SCHED_FIFO, &sp );
+    sched_param sp = { 99 };
+    if( pthread_setschedparam( pthread_self(), SCHED_FIFO, &sp ) != 0 ) TracyDebug( "Failed to increase SysTraceWorker thread priority!\n" );
     for( int i=0; i<s_numBuffers; i++ ) s_ring[i].Enable();
     for(;;)
     {
@@ -1148,19 +1148,20 @@ void SysTraceWorker( void* ptr )
             assert( head > tail );
             hadData = true;
 
+            const auto id = ring.GetId();
+            assert( id != EventContextSwitch );
             const auto end = head - tail;
             uint64_t pos = 0;
-            while( pos < end )
+            if( id == EventCallstack )
             {
-                perf_event_header hdr;
-                ring.Read( &hdr, pos, sizeof( perf_event_header ) );
-                if( hdr.type == PERF_RECORD_SAMPLE )
+                while( pos < end )
                 {
-                    auto offset = pos + sizeof( perf_event_header );
-                    const auto id = ring.GetId();
-                    assert( id != EventContextSwitch );
-                    if( id == EventCallstack )
+                    perf_event_header hdr;
+                    ring.Read( &hdr, pos, sizeof( perf_event_header ) );
+                    if( hdr.type == PERF_RECORD_SAMPLE )
                     {
+                        auto offset = pos + sizeof( perf_event_header );
+
                         // Layout:
                         //   u32 pid, tid
                         //   u64 time
@@ -1193,8 +1194,19 @@ void SysTraceWorker( void* ptr )
                             TracyLfqCommit;
                         }
                     }
-                    else
+                    pos += hdr.size;
+                }
+            }
+            else
+            {
+                while( pos < end )
+                {
+                    perf_event_header hdr;
+                    ring.Read( &hdr, pos, sizeof( perf_event_header ) );
+                    if( hdr.type == PERF_RECORD_SAMPLE )
                     {
+                        auto offset = pos + sizeof( perf_event_header );
+
                         // Layout:
                         //   u64 ip
                         //   u64 time
@@ -1238,8 +1250,8 @@ void SysTraceWorker( void* ptr )
                         MemWrite( &item->hwSample.time, t0 );
                         TracyLfqCommit;
                     }
+                    pos += hdr.size;
                 }
-                pos += hdr.size;
             }
             assert( pos == end );
             ring.Advance( end );
@@ -1312,7 +1324,6 @@ void SysTraceWorker( void* ptr )
                             }
                         }
                     }
-                    assert( sel >= 0 || activeNum == 0 );
                     if( sel >= 0 )
                     {
                         auto& ring = s_ring[s_ctxBufferIdx + sel];
@@ -1440,7 +1451,7 @@ void SysTraceWorker( void* ptr )
         if( !traceActive.load( std::memory_order_relaxed ) ) break;
         if( !hadData )
         {
-            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
         }
     }
 
