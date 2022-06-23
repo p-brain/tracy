@@ -316,17 +316,20 @@ int main( int argc, char** argv )
 
     mainThread = std::this_thread::get_id();
 
-    updateThread = std::thread( [] {
-        HttpRequest( "nereid.pl", "/tracy/version", 8099, [] ( int size, char* data ) {
-            if( size == 4 )
-            {
-                uint32_t ver;
-                memcpy( &ver, data, 4 );
-                RunOnMainThread( [ver] { updateVersion = ver; } );
-            }
-            delete[] data;
+    if ( false ) // config check for new versions
+    {
+        updateThread = std::thread( [] {
+            HttpRequest( "nereid.pl", "/tracy/version", 8099, [] ( int size, char* data ) {
+                if( size == 4 )
+                {
+                    uint32_t ver;
+                    memcpy( &ver, data, 4 );
+                    RunOnMainThread( [ver] { updateVersion = ver; } );
+                }
+                delete[] data;
+            } );
         } );
-    } );
+    }
 
     // Setup window
     glfwSetErrorCallback(glfw_error_callback);
