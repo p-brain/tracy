@@ -5,6 +5,8 @@
 x64
 Release
 Debug
+x64-Release
+x64-Debug
 _build
 _compiler
 tools/*
