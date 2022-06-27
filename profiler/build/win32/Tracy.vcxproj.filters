@@ -401,9 +401,6 @@
     <ClInclude Include="..\..\..\server\TracyShortPtr.hpp">
       <Filter>server</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\server\tracy_xxh3.h">
-      <Filter>server</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\server\TracySort.hpp">
       <Filter>server</Filter>
     </ClInclude>
@@ -576,6 +573,9 @@
       <Filter>nfd</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\server\helpers.h">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\tracy_xxhash.h">
       <Filter>server</Filter>
     </ClInclude>
   </ItemGroup>
