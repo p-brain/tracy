@@ -1749,21 +1749,45 @@ enum { BestTime = 1000 * 1000 * 1000 / 143 };
 enum { GoodTime = 1000 * 1000 * 1000 / 59 };
 enum { BadTime = 1000 * 1000 * 1000 / 29 };
 
+enum { BestTimeBlue = 0xFFDD9900 }; // Blue(ish)
+enum { GoodTimeGreen = 0xFF22DD22 }; // Green
+enum { BadTimeYellow = 0xFF22DDDD }; // Yellow
+enum { VBadTimeRed  = 0xFF2222DD }; // Red
+
 static ImU32 GetFrameColor( uint64_t frameTime )
 {
-    return frameTime > BadTime  ? 0xFF2222DD :
-           frameTime > GoodTime ? 0xFF22DDDD :
-           frameTime > BestTime ? 0xFF22DD22 : 0xFFDD9900;
+    return frameTime > BadTime  ? VBadTimeRed :
+           frameTime > GoodTime ? BadTimeYellow :
+           frameTime > BestTime ? GoodTimeGreen : BestTimeBlue;
 }
 
 static int GetFrameWidth( int frameScale )
 {
-    return frameScale == 0 ? 4 : ( frameScale < 0 ? 6 : 1 );
+    static int lastRet = INT16_MIN;
+    int nRet = frameScale == 0 ? 4 : ( frameScale < 0 ? 6 : 1 );
+
+    if (nRet != lastRet)
+    {
+        Msg( ">>> GetFrameWidth() == %d\n", nRet );
+        lastRet = nRet;
+    }
+
+    return nRet;
 }
 
 static int GetFrameGroup( int frameScale )
 {
-    return frameScale < 2 ? 1 : ( 1 << ( frameScale - 1 ) );
+    static int lastRet = INT16_MIN;
+    int nRet =  frameScale < 2 ? 1 : ( 1 << ( frameScale - 1 ) );
+
+    if (nRet != lastRet)
+    {
+        Msg( ">>> GetFrameGroup() == %d\n", nRet );
+        lastRet = nRet;
+    }
+
+    return nRet;
+
 }
 
 template<class T>
@@ -1803,10 +1827,13 @@ void View::DrawFrames()
         if( wheel > 0 )
         {
             if( m_vd.frameScale >= 0 ) m_vd.frameScale--;
+            Msg("wheel > 0 m_vd.frameScale %d\n", m_vd.frameScale );
         }
         else if( wheel < 0 )
         {
-            if( m_vd.frameScale < 10 ) m_vd.frameScale++;
+            if( m_vd.frameScale < 2 ) m_vd.frameScale++;
+            Msg( "m_vd.frameScale %d\n", m_vd.frameScale );
+
         }
     }
 
@@ -1989,11 +2016,17 @@ void View::DrawFrames()
 
             if( ( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0 )
             {
-                const int pfwidth = GetFrameWidth( prevScale );
-                const int pgroup = GetFrameGroup( prevScale );
+                {
+                    const int pfwidth = GetFrameWidth( prevScale );
+                    const int pgroup = GetFrameGroup( prevScale );
 
-                const auto oldoff = mo * pgroup / pfwidth;
-                m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
+                    const auto oldoff = mo * pgroup / pfwidth;
+
+                    if (( m_vd.frameStart + oldoff ) < total)
+                    {
+                        m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
+                    }
+                }
             }
         }
     }

@@ -575,6 +575,9 @@
     <ClInclude Include="..\..\..\nfd\nfd.h">
       <Filter>nfd</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\server\helpers.h">
+      <Filter>server</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />

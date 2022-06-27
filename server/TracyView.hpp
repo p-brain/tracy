@@ -23,6 +23,9 @@
 #include "TracyWorker.hpp"
 #include "tracy_robin_hood.h"
 
+#include "helpers.h"
+
+
 struct ImVec2;
 struct ImFont;
 
