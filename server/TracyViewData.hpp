@@ -37,7 +37,7 @@ struct ViewData
     int64_t zvEnd = 0;
     int32_t zvHeight = 0;
     int32_t zvScroll = 0;
-    int32_t frameScale = 0;         // vd.Framescale is 
+    int32_t frameScale = 0;
     int32_t frameStart = 0;
 
     uint8_t drawGpuZones = true;
@@ -57,6 +57,7 @@ struct ViewData
     uint8_t ghostZones = true;
 
     uint32_t frameTarget = 60;
+    float    flFrameHeightScale = 1.0f;
 };
 
 struct Annotation
