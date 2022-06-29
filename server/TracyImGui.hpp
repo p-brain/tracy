@@ -194,7 +194,7 @@ static const ImVec4 SyntaxColorsDimmed[] = {
     return res;
 }
 
-[[maybe_unused]] static void DrawStripedRect( ImDrawList* draw, double x0, double y0, double x1, double y1, double sw, uint32_t color, bool fix_stripes_in_screen_space, bool inverted )
+[[maybe_unused]] static void DrawStripedRect( ImDrawList* draw, const ImVec2& wpos, double x0, double y0, double x1, double y1, double sw, uint32_t color, bool fix_stripes_in_screen_space, bool inverted )
 {
     assert( x1 >= x0 );
     assert( y1 >= y0 );
@@ -209,6 +209,9 @@ static const ImVec4 SyntaxColorsDimmed[] = {
         x1 = std::min<double>( ww, x1 );
     }
 
+    x0 += wpos.x;
+    x1 += wpos.x;
+
     ImGui::PushClipRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ), true );
 
     const auto rw = x1 - x0;
@@ -221,8 +224,8 @@ static const ImVec4 SyntaxColorsDimmed[] = {
         const auto window_height = double( ImGui::GetWindowHeight() );
         const auto flipped_v0y = window_height - v0.y; //we transform into a y-is-up coordinate space to achieve upper-left to lower-right stripes. If we didn't, we would calculate values for lower-left to upper-right
 
-        const auto manhatten_distance = x0 + flipped_v0y;
-        const auto in_multiples_of_2_times_sw = int( manhatten_distance / ( sw*2 ) );
+        const auto manhattan_distance = x0 + flipped_v0y;
+        const auto in_multiples_of_2_times_sw = int( manhattan_distance / ( sw*2 ) );
 
         const auto floored_manhatten_distance = double( in_multiples_of_2_times_sw*sw*2 ); //floor in terms of 2 * stripe width
 
