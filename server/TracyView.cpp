@@ -1813,7 +1813,12 @@ void View::DrawFrames()
 
     draw->AddRectFilled( wpos, wpos + ImVec2( w, Height ), 0x33FFFFFF );
     const auto wheel = io.MouseWheel;
-    const auto prevScale = m_vd.frameScale;
+    const auto prevScale = m_vd.frameScale;   
+    const int32_t prevStart = m_vd.frameStart;
+
+
+
+
     if( hover )
     {
         if( wheel > 0 )
@@ -2013,9 +2018,17 @@ void View::DrawFrames()
                     const int pfwidth = GetFrameWidth( prevScale );
                     const int pgroup = GetFrameGroup( prevScale );
 
-                    const auto oldoff = mo * pgroup / pfwidth;
+                    const auto oldoff = mo * (float)pgroup / pfwidth;
 
-                    if (( m_vd.frameStart + oldoff ) < total)
+                    if ( total <= onScreen * group )
+                    {
+                        m_vd.frameStart = 0;
+                    }
+                    else if ( m_vd.frameStart + onScreen * group < total * group )
+                    {
+                        m_vd.frameStart = ( total * group ) - onScreen * group;
+                    }
+                    else
                     {
                         m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
                     }
