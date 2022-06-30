@@ -1756,10 +1756,11 @@ static ImU32 GetFrameColor( uint64_t frameTime )
 static int GetFrameWidth( int frameScale )
 {
     static int lastRet = INT16_MIN;
-    int nRet = frameScale == 0 ? 4 : ( frameScale < 0 ? 6 : 1 );
+    int nRet = frameScale == 0 ? 4 : ( frameScale < 0 ? (-frameScale * 6) : 1 );
 
     if (nRet != lastRet)
     {
+        Msg( ">>> frameScale == %d\n", frameScale );
         Msg( ">>> GetFrameWidth() == %d\n", nRet );
         lastRet = nRet;
     }
@@ -1774,6 +1775,7 @@ static int GetFrameGroup( int frameScale )
 
     if (nRet != lastRet)
     {
+        Msg( ">>> frameScale == %d\n", frameScale );
         Msg( ">>> GetFrameGroup() == %d\n", nRet );
         lastRet = nRet;
     }
@@ -1816,21 +1818,28 @@ void View::DrawFrames()
     const auto prevScale = m_vd.frameScale;   
     const int32_t prevStart = m_vd.frameStart;
 
-
-
-
     if( hover )
     {
-        if( wheel > 0 )
-        {
-            if( m_vd.frameScale >= 0 ) m_vd.frameScale--;
-            Msg("wheel > 0 m_vd.frameScale %d\n", m_vd.frameScale );
-        }
-        else if( wheel < 0 )
-        {
-            if( m_vd.frameScale < 10 ) m_vd.frameScale++;
-            Msg( "m_vd.frameScale %d\n", m_vd.frameScale );
+        const auto mx = io.MousePos.x;
 
+        if (mx > wpos.x && mx < wpos.x + w - 1)
+        {
+            const int total = m_worker.GetFrameCount( *m_frames );
+            const auto mo = mx - ( wpos.x + 1 );
+            const int fwidth = GetFrameWidth( m_vd.frameScale );
+            const int group = GetFrameGroup( m_vd.frameScale );
+            const auto off = mo * group / fwidth;
+
+            if (( m_vd.frameStart + off ) < total)
+
+            if (wheel > 0)
+            {
+                if (m_vd.frameScale > -10) m_vd.frameScale--;
+            }
+            else if (wheel < 0)
+            {
+                if (m_vd.frameScale < 10) m_vd.frameScale++;
+            }
         }
     }
 
@@ -2012,26 +2021,16 @@ void View::DrawFrames()
                 if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameBegin( *m_frames, sel ), m_worker.GetFrameEnd( *m_frames, sel + group - 1 ), true };
             }
 
-            if( ( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0 )
+            if (( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0)
             {
+                const int pfwidth = GetFrameWidth( prevScale );
+                const int pgroup = GetFrameGroup( prevScale );
+
+                const auto oldoff = mo * pgroup / pfwidth;
+
+                if (( m_vd.frameStart + oldoff ) < total)
                 {
-                    const int pfwidth = GetFrameWidth( prevScale );
-                    const int pgroup = GetFrameGroup( prevScale );
-
-                    const auto oldoff = mo * (float)pgroup / pfwidth;
-
-                    if ( total <= onScreen * group )
-                    {
-                        m_vd.frameStart = 0;
-                    }
-                    else if ( m_vd.frameStart + onScreen * group < total * group )
-                    {
-                        m_vd.frameStart = ( total * group ) - onScreen * group;
-                    }
-                    else
-                    {
-                        m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
-                    }
+                    m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
                 }
             }
         }
