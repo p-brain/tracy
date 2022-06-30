@@ -2779,11 +2779,11 @@ void View::DrawZoneFrames( const FrameData& frames )
             }
             if( fbegin >= m_vd.zvStart && endPos != fbegin )
             {
-                DrawLine( draw, dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, wh ), 0x22FFFFFF );
+                DrawLine( draw, dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, wh ), 0xFFFFFFFF ); // Frame start
             }
             if( fend <= m_vd.zvEnd )
             {
-                DrawLine( draw, dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, wh ), 0x22FFFFFF );
+                DrawLine( draw, dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, wh ), 0xFFFFFFFF ); // Frame end
             }
             endPos = fend;
         }
@@ -8827,7 +8827,7 @@ void View::DrawOptions()
     // Slider to set the frames display height
 
     ImGui::Text("Frames Height Scale"); ImGui::SameLine();
-    ImGui::SliderFloat( "", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3f pc", ImGuiSliderFlags_AlwaysClamp );
+    ImGui::SliderFloat( "##frameheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3f pc", ImGuiSliderFlags_AlwaysClamp );
 
     ImGui::Separator();
 
