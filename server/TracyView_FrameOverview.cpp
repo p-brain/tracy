@@ -66,7 +66,7 @@ void View::DrawFrames()
     assert( m_worker.GetFrameCount( *m_frames ) != 0 );
 
     const auto scale = GetScale();
-    const auto Height = 50 * scale;
+    const auto Height = 50 * scale * m_vd.flFrameHeightScale;
 
     enum { MaxFrameTime = 50 * 1000 * 1000 };  // 50ms
 
@@ -290,16 +290,6 @@ void View::DrawFrames()
 
                 if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameBegin( *m_frames, sel ), m_worker.GetFrameEnd( *m_frames, sel + group - 1 ), true };
             }
-
-            if( ( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0 )
-            {
-                const int pfwidth = GetFrameWidth( prevScale );
-                const int pgroup = GetFrameGroup( prevScale );
-
-                const auto oldoff = mo * pgroup / pfwidth;
-                m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
-            }
-
 
             if (( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0)
             {
