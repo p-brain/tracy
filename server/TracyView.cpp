@@ -1760,8 +1760,8 @@ static int GetFrameWidth( int frameScale )
 
     if (nRet != lastRet)
     {
-        Msg( ">>> frameScale == %d\n", frameScale );
-        Msg( ">>> GetFrameWidth() == %d\n", nRet );
+        //Msg( ">>> frameScale == %d\n", frameScale );
+        //Msg( ">>> GetFrameWidth() == %d\n", nRet );
         lastRet = nRet;
     }
 
@@ -1775,8 +1775,8 @@ static int GetFrameGroup( int frameScale )
 
     if (nRet != lastRet)
     {
-        Msg( ">>> frameScale == %d\n", frameScale );
-        Msg( ">>> GetFrameGroup() == %d\n", nRet );
+        //Msg( ">>> frameScale == %d\n", frameScale );
+        //Msg( ">>> GetFrameGroup() == %d\n", nRet );
         lastRet = nRet;
     }
 
