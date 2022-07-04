@@ -3,20 +3,19 @@
 
 #include <atomic>
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "imgui.h"
+
 #include "TracyBadVersion.hpp"
 #include "TracyBuzzAnim.hpp"
 #include "TracyDecayValue.hpp"
 #include "TracyFileWrite.hpp"
-#include "TracyImGui.hpp"
 #include "TracyShortPtr.hpp"
 #include "TracySourceContents.hpp"
-#include "TracyTexture.hpp"
 #include "TracyUserData.hpp"
 #include "TracyVector.hpp"
 #include "TracyViewData.hpp"
@@ -25,12 +24,17 @@
 
 #include "helpers.h"
 
-
-struct ImVec2;
-struct ImFont;
-
 namespace tracy
 {
+
+constexpr const char* GpuContextNames[] = {
+    "Invalid",
+    "OpenGL",
+    "Vulkan",
+    "OpenCL",
+    "Direct3D 12",
+    "Direct3D 11"
+};
 
 struct MemoryPage;
 class FileRead;
@@ -177,15 +181,13 @@ private:
 
     const char* ShortenNamespace( const char* name ) const;
 
-    void DrawHelpMarker( const char* desc ) const;
-
     bool DrawImpl();
     void DrawNotificationArea();
     bool DrawConnection();
     void DrawFrames();
-    void DrawZoneFramesHeader();
-    void DrawZoneFrames( const FrameData& frames );
-    void DrawZones();
+    void DrawTimelineFramesHeader();
+    void DrawTimelineFrames( const FrameData& frames );
+    void DrawTimeline();
     void DrawContextSwitches( const ContextSwitch* ctx, const Vector<SampleData>& sampleData, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int endOffset, bool isFiber );
     void DrawSamples( const Vector<SampleData>& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset );
 #ifndef TRACY_NO_STATISTICS
@@ -261,7 +263,7 @@ private:
     void DrawGpuInfoChildren( const V& children, int64_t ztime );
 
     void HandleRange( Range& range, int64_t timespan, const ImVec2& wpos, float w );
-    void HandleZoneViewMouse( int64_t timespan, const ImVec2& wpos, float w, double& pxns );
+    void HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w, double& pxns );
 
     void AddAnnotation( int64_t start, int64_t end );
 
@@ -382,6 +384,13 @@ private:
     }
 
     void AdjustThreadHeight( View::VisData& vis, int oldOffset, int& offset );
+    float AdjustThreadPosition( View::VisData& vis, float wy, int& offset );
+    static int64_t AdjustGpuTime( int64_t time, int64_t begin, int drift );
+
+    static const char* DecodeContextSwitchState( uint8_t state );
+    static const char* DecodeContextSwitchStateCode( uint8_t state );
+    static const char* DecodeContextSwitchReason( uint8_t reason );
+    static const char* DecodeContextSwitchReasonCode( uint8_t reason );
 
     Worker m_worker;
     std::string m_filename, m_filenameStaging;
@@ -797,6 +806,13 @@ private:
         bool groupBottomUp = true;
         bool groupTopDown = true;
     } m_sampleParents;
+
+    struct
+    {
+        bool enabled = false;
+        bool monitor = false;
+        int64_t time;
+    } m_sendQueueWarning;
 
     std::vector<std::pair<int, int>> m_cpuUsageBuf;
 };
