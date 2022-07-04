@@ -11,22 +11,49 @@ enum { BestTime = 1000 * 1000 * 1000 / 143 };
 enum { GoodTime = 1000 * 1000 * 1000 / 59 };
 enum { BadTime = 1000 * 1000 * 1000 / 29 };
 
+enum { BestTimeBlue = 0xFFDD9900 }; // Blue(ish)
+enum { GoodTimeGreen = 0xFF22DD22 }; // Green
+enum { BadTimeYellow = 0xFF22DDDD }; // Yellow
+enum { VBadTimeRed  = 0xFF2222DD }; // Red
+
 static ImU32 GetFrameColor( uint64_t frameTime )
 {
-    return frameTime > BadTime  ? 0xFF2222DD :
-        frameTime > GoodTime ? 0xFF22DDDD :
-        frameTime > BestTime ? 0xFF22DD22 : 0xFFDD9900;
+    return frameTime > BadTime  ? VBadTimeRed :
+           frameTime > GoodTime ? BadTimeYellow :
+           frameTime > BestTime ? GoodTimeGreen : BestTimeBlue;
 }
 
 static int GetFrameWidth( int frameScale )
 {
-    return frameScale == 0 ? 4 : ( frameScale < 0 ? 6 : 1 );
+    static int lastRet = INT16_MIN;
+    int nRet = frameScale == 0 ? 4 : ( frameScale < 0 ? (-frameScale * 6) : 1 );
+
+    if (nRet != lastRet)
+    {
+//        Msg( ">>> frameScale == %d\n", frameScale );
+//        Msg( ">>> GetFrameWidth() == %d\n", nRet );
+        lastRet = nRet;
+    }
+
+    return nRet;
 }
 
 static int GetFrameGroup( int frameScale )
 {
-    return frameScale < 2 ? 1 : ( 1 << ( frameScale - 1 ) );
+    static int lastRet = INT16_MIN;
+    int nRet =  frameScale < 2 ? 1 : ( 1 << ( frameScale - 1 ) );
+
+    if (nRet != lastRet)
+    {
+//        Msg( ">>> frameScale == %d\n", frameScale );
+//        Msg( ">>> GetFrameGroup() == %d\n", nRet );
+        lastRet = nRet;
+    }
+
+    return nRet;
+
 }
+
 
 template<class T>
 constexpr const T& clamp( const T& v, const T& lo, const T& hi )
@@ -60,15 +87,29 @@ void View::DrawFrames()
     draw->AddRectFilled( wpos, wpos + ImVec2( w, Height ), 0x33FFFFFF );
     const auto wheel = io.MouseWheel;
     const auto prevScale = m_vd.frameScale;
+
     if( hover )
     {
-        if( wheel > 0 )
+        const auto mx = io.MousePos.x;
+
+        if (mx > wpos.x && mx < wpos.x + w - 1)
         {
-            if( m_vd.frameScale >= 0 ) m_vd.frameScale--;
-        }
-        else if( wheel < 0 )
-        {
-            if( m_vd.frameScale < 10 ) m_vd.frameScale++;
+            const int total = m_worker.GetFrameCount( *m_frames );
+            const auto mo = mx - ( wpos.x + 1 );
+            const int fwidth = GetFrameWidth( m_vd.frameScale );
+            const int group = GetFrameGroup( m_vd.frameScale );
+            const auto off = mo * group / fwidth;
+
+            if (( m_vd.frameStart + off ) < total)
+
+            if (wheel > 0)
+            {
+                if (m_vd.frameScale > -10) m_vd.frameScale--;
+            }
+            else if (wheel < 0)
+            {
+                if (m_vd.frameScale < 10) m_vd.frameScale++;
+            }
         }
     }
 
@@ -124,6 +165,7 @@ void View::DrawFrames()
                 ImGui::BeginTooltip();
                 if( group > 1 )
                 {
+                    const auto fnum = GetFrameNumber( *m_frames, sel, m_worker.GetFrameOffset() );
                     auto f = m_worker.GetFrameTime( *m_frames, sel );
                     auto g = std::min( group, total - sel );
                     for( int j=1; j<g; j++ )
@@ -133,7 +175,7 @@ void View::DrawFrames()
 
                     TextDisabledUnformatted( "Frames:" );
                     ImGui::SameLine();
-                    ImGui::Text( "%s - %s (%s)", RealToString( sel ), RealToString( sel + g - 1 ), RealToString( g ) );
+                    ImGui::Text( "%s - %s (%s)", RealToString( fnum ), RealToString( fnum + g - 1 ), RealToString( g ) );
                     ImGui::Separator();
                     TextFocused( "Max frame time:", TimeToString( f ) );
                     ImGui::SameLine();
@@ -256,6 +298,20 @@ void View::DrawFrames()
 
                 const auto oldoff = mo * pgroup / pfwidth;
                 m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
+            }
+
+
+            if (( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0)
+            {
+                const int pfwidth = GetFrameWidth( prevScale );
+                const int pgroup = GetFrameGroup( prevScale );
+
+                const auto oldoff = mo * pgroup / pfwidth;
+
+                if (( m_vd.frameStart + oldoff ) < total)
+                {
+                    m_vd.frameStart = std::min( total, std::max( 0, m_vd.frameStart - int( off - oldoff ) ) );
+                }
             }
         }
     }

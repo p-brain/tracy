@@ -16,6 +16,14 @@ void View::DrawOptions()
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
 
     const auto scale = GetScale();
+
+    // Slider to set the frames display height
+
+    ImGui::Text( "Frames Height Scale" ); ImGui::SameLine();
+    ImGui::SliderFloat( "", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3f pc", ImGuiSliderFlags_AlwaysClamp );
+
+    ImGui::Separator();
+
     bool val = m_vd.drawEmptyLabels;
     ImGui::Checkbox( ICON_FA_EXPAND " Draw empty labels", &val );
     m_vd.drawEmptyLabels = val;
