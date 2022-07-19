@@ -589,6 +589,20 @@ void View::DrawTimeline()
         {
             m_threadOrder.push_back( threadData[i] );
         }
+
+        // Sort Vector based on weights from m_vd.threadorder
+
+        
+
+
+
+
+
+
+
+
+
+
     }
 
     auto& crash = m_worker.GetCrashEvent();

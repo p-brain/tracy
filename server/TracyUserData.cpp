@@ -11,6 +11,16 @@
 #include "TracyUserData.hpp"
 #include "TracyViewData.hpp"
 
+#include "rapidjson/document.h"
+#include "rapidjson/reader.h"
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/error/en.h"
+
+using namespace rapidjson;
+
+
 namespace tracy
 {
 
@@ -19,6 +29,8 @@ constexpr auto FileTimeline = "timeline";
 constexpr auto FileOptions = "options";
 constexpr auto FileAnnotations = "annotations";
 constexpr auto FileSourceSubstitutions = "srcsub";
+constexpr auto FileOptionsEx = "optionsEx.json";
+
 
 enum : uint32_t { VersionTimeline = 0 };
 enum : uint32_t { VersionOptions = 7 };
@@ -116,6 +128,33 @@ void UserData::LoadState( ViewData& data )
         }
         fclose( f );
     }
+
+    f = OpenFile( FileOptionsEx, false );
+    if (f)
+    {
+        fseek( f, 0, SEEK_END );
+        size_t size = ftell( f );
+        std::string str;
+        str.resize( size );
+        rewind( f );
+        fread( &str[ 0 ], 1, size, f );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        fclose( f );
+    }
+
 }
 
 void UserData::SaveState( const ViewData& data )
@@ -160,6 +199,32 @@ void UserData::SaveState( const ViewData& data )
         fwrite( &data.flFrameHeightScale, 1, sizeof( data.flFrameHeightScale ), f );
         fclose( f );
     }
+
+    f = OpenFile( FileOptionsEx, true );
+    if (f)
+    {
+
+        Document d;
+        d.SetObject();
+        Value threadorder( kObjectType );
+
+        d.AddMember( "ThreadOrder", threadorder, d.GetAllocator());
+
+        
+
+
+        d[ "ThreadOrder" ].AddMember( "paul", 1, d.GetAllocator() );
+
+      
+        char writeBuffer[ 65536 ];
+        FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
+        PrettyWriter<FileWriteStream> writer( os );
+
+        d.Accept( writer );
+
+        fclose( f );
+    }
+
 }
 
 void UserData::StateShouldBePreserved()

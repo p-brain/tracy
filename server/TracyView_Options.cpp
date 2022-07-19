@@ -587,6 +587,9 @@ void View::DrawOptions()
         const auto wposx = ImGui::GetCursorScreenPos().x;
         m_threadDnd.clear();
         int idx = 0;
+
+        bool bThreadOrderChanged = false;
+
         for( const auto& t : m_threadOrder )
         {
             m_threadDnd.push_back( ImGui::GetCursorScreenPos().y );
@@ -662,6 +665,8 @@ void View::DrawOptions()
             }
             if( target >= 0 && target != source )
             {
+                bThreadOrderChanged = true;
+
                 const auto srcval = m_threadOrder[source];
                 if( target < source )
                 {
@@ -678,6 +683,21 @@ void View::DrawOptions()
             }
         }
         ImGui::TreePop();
+
+        // If the thread order changed, lets update viewdata here so that the order can be serialised, at exit
+
+        if (bThreadOrderChanged)
+        {
+            m_vd.m_MapThreadNameToPriorty.clear();
+
+			for (int32_t i = 0; i < m_threadOrder.size(); i++)
+			{
+                std::string threadName = m_worker.GetThreadName( m_threadOrder[ i ]->id );
+                m_vd.m_MapThreadNameToPriorty.insert( { threadName, i } );
+			}
+
+            int i = 0;
+        }
     }
 
     ImGui::Separator();
