@@ -114,7 +114,7 @@ void HttpRequest( const char* server, const char* resource, int port, std::funct
     char* data = new char[contentLength];
     memcpy( data, hdr, partSize );
     auto remaining = contentLength - partSize;
-    if( remaining > 0 ) sock.Read( data + partSize, remaining, 15 );
+    if( remaining > 0 ) sock.Read( data + partSize, (int)remaining, 15 );
 
     cb( contentLength, data );
 }

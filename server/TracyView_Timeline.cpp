@@ -590,7 +590,7 @@ void View::DrawTimeline()
             m_threadOrder.push_back( threadData[i] );
         }
 
-        // Sort Vector based on weights from m_vd.threadorder
+        // Sort Vector based on weights from extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
 
         
 

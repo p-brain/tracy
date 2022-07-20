@@ -130,6 +130,13 @@ static uint32_t updateVersion = 0;
 static bool showReleaseNotes = false;
 static std::string releaseNotes;
 
+// Thread orders are accumulated and saved the the config file threadspriority.json
+// Loaded at startup, saved at close
+// Used to sort threads as new threads are added to the view.
+// Global list for all .tracys. Threads will fight it out. 
+
+std::unordered_map < std::string, int32_t > g_MapThreadNameToOrder;
+
 void RunOnMainThread( std::function<void()> cb, bool forceDelay = false )
 {
     if( !forceDelay && std::this_thread::get_id() == mainThread )

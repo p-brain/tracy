@@ -40,6 +40,8 @@ struct MemoryPage;
 class FileRead;
 class SourceView;
 
+extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
+
 class View
 {
     struct Animation

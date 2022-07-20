@@ -855,6 +855,7 @@ void View::DrawInfo()
                 }
                 catch( std::regex_error& err )
                 {
+                    _CRT_UNUSED( err );
                     regexValid = false;
                     break;
                 }

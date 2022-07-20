@@ -60,9 +60,6 @@ struct ViewData
 
     uint32_t frameTarget = 60;
     float    flFrameHeightScale = 1.0f;
-
-    std::unordered_map < std::string, int32_t >m_MapThreadNameToPriorty;
-
 };
 
 struct Annotation

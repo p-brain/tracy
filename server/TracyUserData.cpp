@@ -132,26 +132,12 @@ void UserData::LoadState( ViewData& data )
     f = OpenFile( FileOptionsEx, false );
     if (f)
     {
-        fseek( f, 0, SEEK_END );
-        size_t size = ftell( f );
-        std::string str;
-        str.resize( size );
-        rewind( f );
-        fread( &str[ 0 ], 1, size, f );
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        // Read in some dummy data for now.
+        char readBuffer[ 65536 ];
+        FileReadStream is( f, readBuffer, sizeof( readBuffer ) );
+        Document d;
+        d.ParseStream( is );
+        int nMainThreadOrder = d[ "ThreadOrder" ]["MainThread"].GetInt();
         fclose( f );
     }
 
@@ -203,25 +189,16 @@ void UserData::SaveState( const ViewData& data )
     f = OpenFile( FileOptionsEx, true );
     if (f)
     {
-
+        // Write out some dummy data for now.
         Document d;
         d.SetObject();
         Value threadorder( kObjectType );
-
         d.AddMember( "ThreadOrder", threadorder, d.GetAllocator());
-
-        
-
-
-        d[ "ThreadOrder" ].AddMember( "paul", 1, d.GetAllocator() );
-
-      
+        d[ "ThreadOrder" ].AddMember( "MainThread", 1, d.GetAllocator() );   
         char writeBuffer[ 65536 ];
         FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
         PrettyWriter<FileWriteStream> writer( os );
-
         d.Accept( writer );
-
         fclose( f );
     }
 
@@ -341,6 +318,7 @@ bool UserData::LoadSourceSubstitutions( std::vector<SourceRegex>& data )
                 }
                 catch( std::regex_error& err )
                 {
+                    _CRT_UNUSED( err );
                     regexValid = false;
                 }
                 data.emplace_back( SourceRegex { std::move( pattern ), std::move( target ), std::move( regex ) } );
