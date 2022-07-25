@@ -686,7 +686,7 @@ void View::DrawOptions()
         }
         ImGui::TreePop();
 
-        // If the thread order changed, lets update viewdata here so that the order can be serialised, at exit
+        // If the thread order changed, lets update g_MapThreadNameToOrder here so that the order can be serialised, at exit
 
         if (bThreadOrderChanged)
         {
@@ -698,7 +698,8 @@ void View::DrawOptions()
                 g_MapThreadNameToOrder.insert( { threadName, i } );
 			}
 
-            int i = 0;
+            extern bool gb_reApplyThreadOrder;
+            gb_reApplyThreadOrder = true;
         }
     }
 

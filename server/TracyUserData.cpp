@@ -133,11 +133,11 @@ void UserData::LoadState( ViewData& data )
     if (f)
     {
         // Read in some dummy data for now.
-        char readBuffer[ 65536 ];
-        FileReadStream is( f, readBuffer, sizeof( readBuffer ) );
-        Document d;
-        d.ParseStream( is );
-        int nMainThreadOrder = d[ "ThreadOrder" ]["MainThread"].GetInt();
+//        char readBuffer[ 65536 ];
+//        FileReadStream is( f, readBuffer, sizeof( readBuffer ) );
+//        Document d;
+//        d.ParseStream( is );
+//        int nMainThreadOrder = d[ "ThreadOrder" ]["MainThread"].GetInt();
         fclose( f );
     }
 
@@ -190,16 +190,16 @@ void UserData::SaveState( const ViewData& data )
     if (f)
     {
         // Write out some dummy data for now.
-        Document d;
-        d.SetObject();
-        Value threadorder( kObjectType );
-        d.AddMember( "ThreadOrder", threadorder, d.GetAllocator());
-        d[ "ThreadOrder" ].AddMember( "MainThread", 1, d.GetAllocator() );   
-        char writeBuffer[ 65536 ];
-        FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
-        PrettyWriter<FileWriteStream> writer( os );
-        d.Accept( writer );
-        fclose( f );
+//        Document d;
+//        d.SetObject();
+//        Value threadorder( kObjectType );
+//        d.AddMember( "ThreadOrder", threadorder, d.GetAllocator());
+//        d[ "ThreadOrder" ].AddMember( "MainThread", 1, d.GetAllocator() );   
+//        char writeBuffer[ 65536 ];
+//        FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
+//        PrettyWriter<FileWriteStream> writer( os );
+//        d.Accept( writer );
+          fclose( f );
     }
 
 }

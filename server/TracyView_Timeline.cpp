@@ -581,13 +581,17 @@ void View::DrawTimeline()
         offset = DrawCpuData( offset, pxns, wpos, hover, yMin, yMax );
     }
 
+    extern bool gb_reApplyThreadOrder;
     const auto& threadData = m_worker.GetThreadData();
-    if( threadData.size() != m_threadOrder.size() )
+    if(gb_reApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
     {
-        m_threadOrder.reserve( threadData.size() );
-        for( size_t i=m_threadOrder.size(); i<threadData.size(); i++ )
+        if (( threadData.size() != m_threadOrder.size() ))
         {
-            m_threadOrder.push_back( threadData[i] );
+            m_threadOrder.reserve( threadData.size() );
+            for (size_t i = m_threadOrder.size(); i < threadData.size(); i++)
+            {
+                m_threadOrder.push_back( threadData[ i ] );
+            }
         }
 
         // Sort Vector based on weights from extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;

@@ -136,6 +136,7 @@ static std::string releaseNotes;
 // Global list for all .tracys. Threads will fight it out. 
 
 std::unordered_map < std::string, int32_t > g_MapThreadNameToOrder;
+bool gb_reApplyThreadOrder;
 
 void RunOnMainThread( std::function<void()> cb, bool forceDelay = false )
 {
