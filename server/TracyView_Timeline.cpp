@@ -6,8 +6,13 @@
 #include "TracySourceView.hpp"
 #include "TracyView.hpp"
 
+
 namespace tracy
 {
+
+extern bool gb_reApplyThreadOrder;
+extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
+
 
 enum { MinVisSize = 3 };
 
@@ -581,7 +586,7 @@ void View::DrawTimeline()
         offset = DrawCpuData( offset, pxns, wpos, hover, yMin, yMax );
     }
 
-    extern bool gb_reApplyThreadOrder;
+    
     const auto& threadData = m_worker.GetThreadData();
     if(gb_reApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
     {
@@ -594,19 +599,28 @@ void View::DrawTimeline()
             }
         }
 
-        // Sort Vector based on weights from extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-
-        
+        extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
 
 
+        for (int i = 0; i < threadData.size(); i++)
+        {         
+            auto it = g_MapThreadNameToPriority.find( m_worker.GetThreadName( threadData[ i ]->id ) );
 
+            if (it == g_MapThreadNameToPriority.end())
+            {
+                threadData[ i ]->nSort = threadData.size() + i;
+            }
+            else
+            {
+                threadData[ i ]->nSort = it->second;
+            }        
+        }
 
-
-
-
-
-
-
+        std::sort( m_threadOrder.begin(), m_threadOrder.end(),
+                   [] ( const ThreadData *a, const ThreadData *b )
+                   {
+                       return a->nSort < b->nSort;
+                   } );
     }
 
     auto& crash = m_worker.GetCrashEvent();

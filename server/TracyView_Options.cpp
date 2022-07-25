@@ -7,10 +7,14 @@
 #include "TracyPrint.hpp"
 #include "TracyView.hpp"
 
-extern std::unordered_map < std::string, int32_t > g_MapThreadNameToOrder;
+
+
 
 namespace tracy
 {
+
+extern bool gb_reApplyThreadOrder;
+extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
 
 void View::DrawOptions()
 {
@@ -690,15 +694,14 @@ void View::DrawOptions()
 
         if (bThreadOrderChanged)
         {
-            g_MapThreadNameToOrder.clear();
+            g_MapThreadNameToPriority.clear();
 
 			for (int32_t i = 0; i < m_threadOrder.size(); i++)
 			{
                 std::string threadName = m_worker.GetThreadName( m_threadOrder[ i ]->id );
-                g_MapThreadNameToOrder.insert( { threadName, i } );
+                g_MapThreadNameToPriority[ threadName ] = i;
 			}
 
-            extern bool gb_reApplyThreadOrder;
             gb_reApplyThreadOrder = true;
         }
     }
