@@ -10,10 +10,6 @@
 namespace tracy
 {
 
-extern bool gb_reApplyThreadOrder;
-extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-
-
 enum { MinVisSize = 3 };
 
 extern double s_time;
@@ -608,7 +604,7 @@ void View::DrawTimeline()
 
             if (it == g_MapThreadNameToPriority.end())
             {
-                threadData[ i ]->nSort = threadData.size() + i;
+                threadData[ i ]->nSort = 0x100000 - i;
             }
             else
             {
@@ -621,6 +617,11 @@ void View::DrawTimeline()
                    {
                        return a->nSort < b->nSort;
                    } );
+
+
+        // Copy new threadorder data out to data that's saved
+
+
     }
 
     auto& crash = m_worker.GetCrashEvent();

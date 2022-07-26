@@ -56,6 +56,17 @@
 #include "NativeWindow.hpp"
 #include "HttpRequest.hpp"
 
+#define RAPIDJSON_HAS_STDSTRING 1
+#include "rapidjson/document.h"
+#include "rapidjson/reader.h"
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/error/en.h"
+using namespace rapidjson;
+
+#include "../../server/helpers.h"
+
 static void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "Error %d: %s\n", error, description);
@@ -256,6 +267,35 @@ int main( int argc, char** argv )
             argv += 2;
         }
     }
+
+    // Attempt to load saved data from glocal options
+
+    std::string filename = tracy::GetSavePath( "globaloptions.json" );
+    {
+        FILE* f = fopen( filename.c_str(), "r" );
+        if (f)
+        {
+            char readBuffer[ 65536 ];
+            FileReadStream is( f, readBuffer, sizeof( readBuffer ) );
+            Document d;
+            d.ParseStream( is );
+
+            if (d.HasMember( "ThreadOrder" ))
+            {
+                // Iterate members
+
+                const Value& ThreadOrder = d[ "ThreadOrder" ];
+
+                for (Value::ConstMemberIterator iter = ThreadOrder.MemberBegin(); iter != ThreadOrder.MemberEnd(); ++iter)
+                {
+                    tracy::g_MapThreadNameToPriority[ iter->name.GetString() ] = iter->value.GetInt();
+                }
+            }
+
+            fclose( f );
+        }
+    }
+
 
     std::string winPosFile = tracy::GetSavePath( "window.position" );
     int x = 200, y = 200, w = 1650, h = 960, maximize = 0;
@@ -526,6 +566,35 @@ int main( int argc, char** argv )
 
             fclose( f );
         }
+    }
+
+    // Write out some globaloptions
+
+    filename = tracy::GetSavePath( "globaloptions.json" );
+    {
+        {
+            FILE* f = fopen( filename.c_str(), "w" );
+            if (f)
+            {
+                Document d;
+                d.SetObject();
+                Value threadorder( kObjectType );
+                d.AddMember( "ThreadOrder", threadorder, d.GetAllocator() );
+
+                for (auto& it : tracy::g_MapThreadNameToPriority)
+                {
+                    d[ "ThreadOrder" ].AddMember( Value( kStringType ).SetString( it.first, d.GetAllocator() ), it.second, d.GetAllocator());
+                }
+
+                char writeBuffer[ 65536 ];
+                FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
+                PrettyWriter<FileWriteStream> writer( os );
+                d.Accept( writer );
+                fclose( f );
+            }
+
+        }
+
     }
 
     return 0;

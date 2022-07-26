@@ -40,7 +40,16 @@ struct MemoryPage;
 class FileRead;
 class SourceView;
 
+struct CSortedThreads
+{
+    std::string m_name;
+    int32_t     m_nSort;
+};
+
 extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
+
+
+extern bool gb_reApplyThreadOrder;
 
 class View
 {
