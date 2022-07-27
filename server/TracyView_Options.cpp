@@ -26,7 +26,7 @@ void View::DrawOptions()
     // Slider to set the frames display height
 
     ImGui::Text( "Frames Height Scale" ); ImGui::SameLine();
-    ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3f pc", ImGuiSliderFlags_AlwaysClamp );
+    ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3fx", ImGuiSliderFlags_AlwaysClamp );
 
     ImGui::Separator();
 

@@ -348,6 +348,13 @@ void View::DrawZoneInfoWindow()
             {
                 ViewSource( fileName, srcloc.line );
             }
+            ImGui::SameLine();
+            if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
+            {
+                std::string cmd;
+                cmd = cmd + "c:\\binbat\\vsedit.bat " + fileName + " " + std::to_string(srcloc.line);
+                system( cmd.c_str() );               
+            }
             if( hilite )
             {
                 ImGui::PopStyleColor( 3 );
@@ -1395,6 +1402,13 @@ void View::DrawGpuInfoWindow()
             if( ImGui::Button( ICON_FA_FILE_ALT " Source" ) )
             {
                 ViewSource( fileName, srcloc.line );
+            }
+            ImGui::SameLine();
+            if (ImGui::Button( ICON_FA_FILE_CODE " MsVc" ))
+            {
+                std::string cmd;
+                cmd = cmd + "c:\\binbat\\vsedit.bat " + fileName + " " + std::to_string( srcloc.line );
+                system( cmd.c_str() );
             }
             if( hilite )
             {
