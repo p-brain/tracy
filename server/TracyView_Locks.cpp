@@ -1,5 +1,6 @@
 #include <inttypes.h>
 
+#include "TracyColor.hpp"
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
 #include "TracyMouse.hpp"
@@ -259,7 +260,9 @@ void View::DrawLockHeader( uint32_t id, const LockMap& lockmap, const SourceLoca
     {
         sprintf( buf, "%" PRIu32 ": %s", id, m_worker.GetString( srcloc.function ) );
     }
+    ImGui::PushFont( m_smallFont );
     DrawTextContrast( draw, wpos + ImVec2( 0, offset ), 0xFF8888FF, buf );
+    ImGui::PopFont();
     if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( 0, offset ), wpos + ImVec2( w, offset + ty + 1 ) ) )
     {
         m_lockHoverHighlight = id;
@@ -342,7 +345,9 @@ int View::DrawLocks( uint64_t tid, bool hover, double pxns, const ImVec2& wpos, 
     const auto delay = m_worker.GetDelay();
     const auto resolution = m_worker.GetResolution();
     const auto w = ImGui::GetContentRegionAvail().x - 1;
+    ImGui::PushFont( m_smallFont );
     const auto ty = ImGui::GetTextLineHeight();
+    ImGui::PopFont();
     const auto ostep = ty + 1;
     auto draw = ImGui::GetWindowDrawList();
     const auto dsz = delay * pxns;
@@ -984,15 +989,19 @@ void View::DrawLockInfoWindow()
             ImGui::SameLine();
         }
         ImGui::TextUnformatted( LocationToString( fileName, srcloc.line ) );
-        if( ImGui::IsItemClicked( 1 ) )
+        if( ImGui::IsItemHovered() )
         {
-            if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
+            DrawSourceTooltip( fileName, srcloc.line );
+            if( ImGui::IsItemClicked( 1 ) )
             {
-                ViewSource( fileName, srcloc.line );
-            }
-            else
-            {
-                m_lockInfoAnim.Enable( m_lockInfoWindow, 0.5f );
+                if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
+                {
+                    ViewSource( fileName, srcloc.line );
+                }
+                else
+                {
+                    m_lockInfoAnim.Enable( m_lockInfoWindow, 0.5f );
+                }
             }
         }
         ImGui::Separator();

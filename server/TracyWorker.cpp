@@ -24,10 +24,10 @@
 #define ZDICT_STATIC_LINKING_ONLY
 #include "../zstd/zdict.h"
 
-#include "../common/TracyProtocol.hpp"
-#include "../common/TracySystem.hpp"
-#include "../common/TracyYield.hpp"
-#include "../common/TracyStackFrames.hpp"
+#include "../public/common/TracyProtocol.hpp"
+#include "../public/common/TracySystem.hpp"
+#include "../public/common/TracyYield.hpp"
+#include "../public/common/TracyStackFrames.hpp"
 #include "TracyFileRead.hpp"
 #include "TracyFileWrite.hpp"
 #include "TracySort.hpp"
@@ -454,6 +454,9 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
         plot->name = nptr;
         plot->type = PlotType::User;
         plot->format = v.format;
+        plot->showSteps = false;
+        plot->fill = true;
+        plot->color = 0;
 
         double sum = 0;
         double min = v.data.begin()->second;
@@ -682,7 +685,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
         auto dst = m_slab.Alloc<char>( ssz+1 );
         f.Read( dst, ssz );
         dst[ssz] = '\0';
-        m_data.stringMap.emplace( charutil::StringKey { dst, ssz }, i );
+        m_data.stringMap.emplace( charutil::StringKey { dst, size_t( ssz ) }, i );
         m_data.stringData[i] = ( dst );
         pointerMap.emplace( ptr, dst );
     }
@@ -1096,7 +1099,29 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     {
         m_data.plots.Data().reserve( sz );
         s_loadProgress.subTotal.store( sz, std::memory_order_relaxed );
-        if( fileVer >= FileVersion( 0, 7, 10 ) )
+        if( fileVer >= FileVersion( 0, 8, 3 ) )
+        {
+            for( uint64_t i=0; i<sz; i++ )
+            {
+                s_loadProgress.subProgress.store( i, std::memory_order_relaxed );
+                auto pd = m_slab.AllocInit<PlotData>();
+                uint64_t psz;
+                f.Read10( pd->type, pd->format, pd->showSteps, pd->fill, pd->color, pd->name, pd->min, pd->max, pd->sum, psz );
+                pd->data.reserve_exact( psz, m_slab );
+                auto ptr = pd->data.data();
+                int64_t refTime = 0;
+                for( uint64_t j=0; j<psz; j++ )
+                {
+                    int64_t t;
+                    f.Read2( t, ptr->val );
+                    refTime += t;
+                    ptr->time = refTime;
+                    ptr++;
+                }
+                m_data.plots.Data().push_back_no_space_check( pd );
+            }
+        }
+        else if( fileVer >= FileVersion( 0, 7, 10 ) )
         {
             for( uint64_t i=0; i<sz; i++ )
             {
@@ -1104,6 +1129,9 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
                 auto pd = m_slab.AllocInit<PlotData>();
                 uint64_t psz;
                 f.Read7( pd->type, pd->format, pd->name, pd->min, pd->max, pd->sum, psz );
+                pd->showSteps = false;
+                pd->fill = true;
+                pd->color = 0;
                 pd->data.reserve_exact( psz, m_slab );
                 auto ptr = pd->data.data();
                 int64_t refTime = 0;
@@ -1127,6 +1155,9 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
                 uint64_t psz;
                 f.Read6( pd->type, pd->format, pd->name, pd->min, pd->max, psz );
                 pd->sum = 0;
+                pd->showSteps = false;
+                pd->fill = true;
+                pd->color = 0;
                 pd->data.reserve_exact( psz, m_slab );
                 auto ptr = pd->data.data();
                 int64_t refTime = 0;
@@ -1145,7 +1176,18 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     }
     else
     {
-        if( fileVer >= FileVersion( 0, 7, 10 ) )
+        if( fileVer >= FileVersion( 0, 8, 3 ) )
+        {
+            for( uint64_t i=0; i<sz; i++ )
+            {
+                f.Skip( sizeof( PlotData::name ) + sizeof( PlotData::min ) + sizeof( PlotData::max ) + sizeof( PlotData::sum ) + sizeof( PlotData::type ) + sizeof( PlotData::format ) + sizeof( PlotData::showSteps ) + sizeof( PlotData::fill ) + sizeof( PlotData::color ) );
+                uint64_t psz;
+                f.Read( psz );
+                f.Skip( psz * ( sizeof( uint64_t ) + sizeof( double ) ) );
+            }
+
+        }
+        else if( fileVer >= FileVersion( 0, 7, 10 ) )
         {
             for( uint64_t i=0; i<sz; i++ )
             {
@@ -1663,6 +1705,13 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     {
         m_data.symbolLocInline[symInlineIdx] = std::numeric_limits<uint64_t>::max();
     }
+#ifdef NO_PARALLEL_SORT
+    pdqsort_branchless( m_data.symbolLoc.begin(), m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+    pdqsort_branchless( m_data.symbolLocInline.begin(), m_data.symbolLocInline.end() );
+#else
+    std::sort( std::execution::par_unseq, m_data.symbolLoc.begin(), m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+    std::sort( std::execution::par_unseq, m_data.symbolLocInline.begin(), m_data.symbolLocInline.end() );
+#endif
 
     f.Read( sz );
     if( eventMask & EventType::SymbolCode )
@@ -4633,6 +4682,9 @@ bool Worker::Process( const QueueItem& ev )
     case QueueType::FrameMarkMsgEnd:
         ProcessFrameMarkEnd( ev.frameMark );
         break;
+    case QueueType::FrameVsync:
+        ProcessFrameVsync( ev.frameVsync );
+        break;
     case QueueType::FrameImage:
         ProcessFrameImage( ev.frameImage );
         break;
@@ -4674,7 +4726,7 @@ bool Worker::Process( const QueueItem& ev )
         ProcessLockSharedObtain( ev.lockObtain );
         break;
     case QueueType::LockSharedRelease:
-        ProcessLockSharedRelease( ev.lockRelease );
+        ProcessLockSharedRelease( ev.lockReleaseShared );
         break;
     case QueueType::LockMark:
         ProcessLockMark( ev.lockMark );
@@ -4682,8 +4734,14 @@ bool Worker::Process( const QueueItem& ev )
     case QueueType::LockName:
         ProcessLockName( ev.lockName );
         break;
-    case QueueType::PlotData:
-        ProcessPlotData( ev.plotData );
+    case QueueType::PlotDataInt:
+        ProcessPlotDataInt( ev.plotDataInt );
+        break;
+    case QueueType::PlotDataFloat:
+        ProcessPlotDataFloat( ev.plotDataFloat );
+        break;
+    case QueueType::PlotDataDouble:
+        ProcessPlotDataDouble( ev.plotDataDouble );
         break;
     case QueueType::PlotConfig:
         ProcessPlotConfig( ev.plotConfig );
@@ -5262,6 +5320,38 @@ void Worker::ProcessFrameMarkEnd( const QueueFrameMark& ev )
 #endif
 }
 
+void Worker::ProcessFrameVsync( const QueueFrameVsync& ev )
+{
+    auto it = m_vsyncFrameMap.find( ev.id );
+    if( it == m_vsyncFrameMap.end() )
+    {
+        auto fd = m_slab.AllocInit<FrameData>();
+        // Hackfix workaround to maintain backwards compatibility.
+        // Frame name pointers won't be in kernel space. Exploit that to store custom IDs.
+        fd->name = uint64_t( m_vsyncFrameMap.size() ) | 0x8000000000000000;
+        fd->continuous = 1;
+        m_data.frames.AddExternal( fd );
+        it = m_vsyncFrameMap.emplace( ev.id, fd ).first;
+    }
+    auto fd = it->second;
+    assert( fd->continuous == 1 );
+    const auto time = TscTime( ev.time );
+    assert( fd->frames.empty() || fd->frames.back().start <= time );
+    fd->frames.push_back( FrameEvent{ time, -1, -1 } );
+    if( m_data.lastTime < time ) m_data.lastTime = time;
+
+#ifndef TRACY_NO_STATISTICS
+    const auto timeSpan = GetFrameTime( *fd, fd->frames.size() - 1 );
+    if( timeSpan > 0 )
+    {
+        fd->min = std::min( fd->min, timeSpan );
+        fd->max = std::max( fd->max, timeSpan );
+        fd->total += timeSpan;
+        fd->sumSq += double( timeSpan ) * timeSpan;
+    }
+#endif
+}
+
 void Worker::ProcessFrameImage( const QueueFrameImage& ev )
 {
     assert( m_pendingFrameImageData.image != nullptr );
@@ -5458,6 +5548,7 @@ void Worker::ProcessLockAnnounce( const QueueLockAnnounce& ev )
     lm->timeTerminate = 0;
     lm->valid = true;
     lm->isContended = false;
+    lm->lockingThread = 0;
     m_data.lockMap.emplace( ev.id, lm );
     CheckSourceLocation( ev.lckloc );
 }
@@ -5497,6 +5588,7 @@ void Worker::ProcessLockObtain( const QueueLockObtain& ev )
     lev->type = LockEvent::Type::Obtain;
 
     InsertLockEvent( lock, lev, ev.thread, time );
+    lock.lockingThread = ev.thread;
 }
 
 void Worker::ProcessLockRelease( const QueueLockRelease& ev )
@@ -5511,7 +5603,7 @@ void Worker::ProcessLockRelease( const QueueLockRelease& ev )
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::Release;
 
-    InsertLockEvent( lock, lev, ev.thread, time );
+    InsertLockEvent( lock, lev, lock.lockingThread, time );
 }
 
 void Worker::ProcessLockSharedWait( const QueueLockWait& ev )
@@ -5546,7 +5638,7 @@ void Worker::ProcessLockSharedObtain( const QueueLockObtain& ev )
     InsertLockEvent( lock, lev, ev.thread, time );
 }
 
-void Worker::ProcessLockSharedRelease( const QueueLockRelease& ev )
+void Worker::ProcessLockSharedRelease( const QueueLockReleaseShared& ev )
 {
     auto it = m_data.lockMap.find( ev.id );
     assert( it != m_data.lockMap.end() );
@@ -5599,47 +5691,41 @@ void Worker::ProcessLockName( const QueueLockName& ev )
     lit->second->customName = StringIdx( GetSingleStringIdx() );
 }
 
-void Worker::ProcessPlotData( const QueuePlotData& ev )
+void Worker::ProcessPlotDataInt( const QueuePlotDataInt& ev )
 {
-    switch( ev.type )
-    {
-    case PlotDataType::Double:
-        if( !isfinite( ev.data.d ) ) return;
-        break;
-    case PlotDataType::Float:
-        if( !isfinite( ev.data.f ) ) return;
-        break;
-    default:
-        break;
-    }
+    ProcessPlotDataImpl( ev.name, ev.time, (double)ev.val );
+}
 
-    PlotData* plot = m_data.plots.Retrieve( ev.name, [this] ( uint64_t name ) {
+void Worker::ProcessPlotDataFloat( const QueuePlotDataFloat& ev )
+{
+    if( !isfinite( ev.val ) ) return;
+    ProcessPlotDataImpl( ev.name, ev.time, (double)ev.val );
+}
+
+void Worker::ProcessPlotDataDouble( const QueuePlotDataDouble& ev )
+{
+    if( !isfinite( ev.val ) ) return;
+    ProcessPlotDataImpl( ev.name, ev.time, ev.val );
+}
+
+void Worker::ProcessPlotDataImpl( uint64_t name, int64_t evTime, double val )
+{
+    PlotData* plot = m_data.plots.Retrieve( name, [this] ( uint64_t name ) {
         auto plot = m_slab.AllocInit<PlotData>();
         plot->name = name;
         plot->type = PlotType::User;
         plot->format = PlotValueFormatting::Number;
+        plot->showSteps = false;
+        plot->fill = true;
+        plot->color = 0;
         return plot;
     }, [this]( uint64_t name ) {
         Query( ServerQueryPlotName, name );
     } );
 
-    const auto time = TscTime( RefTime( m_refTimeThread, ev.time ) );
+    const auto time = TscTime( RefTime( m_refTimeThread, evTime ) );
     if( m_data.lastTime < time ) m_data.lastTime = time;
-    switch( ev.type )
-    {
-    case PlotDataType::Double:
-        InsertPlot( plot, time, ev.data.d );
-        break;
-    case PlotDataType::Float:
-        InsertPlot( plot, time, (double)ev.data.f );
-        break;
-    case PlotDataType::Int:
-        InsertPlot( plot, time, (double)ev.data.i );
-        break;
-    default:
-        assert( false );
-        break;
-    }
+    InsertPlot( plot, time, val );
 }
 
 void Worker::ProcessPlotConfig( const QueuePlotConfig& ev )
@@ -5654,6 +5740,9 @@ void Worker::ProcessPlotConfig( const QueuePlotConfig& ev )
     } );
 
     plot->format = (PlotValueFormatting)ev.type;
+    plot->showSteps = ev.step;
+    plot->fill = ev.fill;
+    plot->color = ev.color & 0xFFFFFF;
 }
 
 void Worker::ProcessMessage( const QueueMessage& ev )
@@ -6775,6 +6864,9 @@ void Worker::ProcessSysTime( const QueueSysTime& ev )
         m_sysTimePlot->name = 0;
         m_sysTimePlot->type = PlotType::SysTime;
         m_sysTimePlot->format = PlotValueFormatting::Percentage;
+        m_sysTimePlot->showSteps = false;
+        m_sysTimePlot->fill = true;
+        m_sysTimePlot->color = 0;
         m_sysTimePlot->min = val;
         m_sysTimePlot->max = val;
         m_sysTimePlot->sum = val;
@@ -7091,6 +7183,9 @@ void Worker::CreateMemAllocPlot( MemData& memdata )
     memdata.plot->name = memdata.name;
     memdata.plot->type = PlotType::Memory;
     memdata.plot->format = PlotValueFormatting::Memory;
+    memdata.plot->showSteps = true;
+    memdata.plot->fill = true;
+    memdata.plot->color = 0;
     memdata.plot->data.push_back( { GetFrameBegin( *m_data.framesBase, 0 ), 0. } );
     m_data.plots.Data().push_back( memdata.plot );
 }
@@ -7109,12 +7204,15 @@ void Worker::ReconstructMemAllocPlot( MemData& mem )
     {
         std::lock_guard<std::mutex> lock( m_data.lock );
         plot = m_slab.AllocInit<PlotData>();
+        plot->data.reserve_exact( psz, m_slab );
     }
 
     plot->name = mem.name;
     plot->type = PlotType::Memory;
     plot->format = PlotValueFormatting::Memory;
-    plot->data.reserve_exact( psz, m_slab );
+    plot->showSteps = true;
+    plot->fill = true;
+    plot->color = 0;
 
     auto aptr = mem.data.begin();
     auto aend = mem.data.end();
@@ -8066,6 +8164,9 @@ void Worker::Write( FileWrite& f, bool fiDict )
         if( plot->type == PlotType::Memory ) continue;
         f.Write( &plot->type, sizeof( plot->type ) );
         f.Write( &plot->format, sizeof( plot->format ) );
+        f.Write( &plot->showSteps, sizeof( plot->showSteps ) );
+        f.Write( &plot->fill, sizeof( plot->fill ) );
+        f.Write( &plot->color, sizeof( plot->color ) );
         f.Write( &plot->name, sizeof( plot->name ) );
         f.Write( &plot->min, sizeof( plot->min ) );
         f.Write( &plot->max, sizeof( plot->max ) );

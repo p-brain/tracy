@@ -38,6 +38,7 @@ void View::DrawOptions()
     m_vd.drawFrameTargets = val;
     ImGui::Indent();
     int tmp = m_vd.frameTarget;
+    ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
     ImGui::SetNextItemWidth( 90 * scale );
     if( ImGui::InputInt( "Target FPS", &tmp ) )
     {
@@ -46,6 +47,22 @@ void View::DrawOptions()
     }
     ImGui::SameLine();
     TextDisabledUnformatted( TimeToString( 1000*1000*1000 / tmp ) );
+    ImGui::PopStyleVar();
+    ImGui::PushFont( m_smallFont );
+    SmallColorBox( 0xFF2222DD );
+    ImGui::SameLine( 0, 0 );
+    ImGui::Text( "  <  %i  <  ", tmp / 2 );
+    ImGui::SameLine( 0, 0 );
+    SmallColorBox( 0xFF22DDDD );
+    ImGui::SameLine( 0, 0 );
+    ImGui::Text( "  <  %i  <  ", tmp );
+    ImGui::SameLine( 0, 0 );
+    SmallColorBox( 0xFF22DD22 );
+    ImGui::SameLine( 0, 0 );
+    ImGui::Text( "  <  %i  <  ", tmp * 2 );
+    ImGui::SameLine( 0, 0 );
+    SmallColorBox( 0xFFDD9900 );
+    ImGui::PopFont();
     ImGui::Unindent();
     if( m_worker.HasContextSwitches() )
     {
@@ -557,6 +574,8 @@ void View::DrawOptions()
 
             for( const auto& p : m_worker.GetPlots() )
             {
+                SmallColorBox( GetPlotColor( p ) );
+                ImGui::SameLine();
                 SmallCheckbox( GetPlotName( p ), &Vis( p ).visible );
                 ImGui::SameLine();
                 ImGui::TextDisabled( "%s data points", RealToString( p->data.size() ) );
@@ -733,7 +752,7 @@ void View::DrawOptions()
         for( const auto& fd : m_worker.GetFrames() )
         {
             ImGui::PushID( idx++ );
-            SmallCheckbox( fd->name == 0 ? "Frames" : m_worker.GetString( fd->name ), &Vis( fd ).visible );
+            SmallCheckbox( GetFrameSetName( *fd ), &Vis( fd ).visible );
             ImGui::PopID();
             ImGui::SameLine();
             ImGui::TextDisabled( "%s %sframes", RealToString( fd->frames.size() ), fd->continuous ? "" : "discontinuous " );

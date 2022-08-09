@@ -105,11 +105,6 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\common\TracySocket.cpp" />
-    <ClCompile Include="..\..\..\common\TracyStackFrames.cpp" />
-    <ClCompile Include="..\..\..\common\TracySystem.cpp" />
-    <ClCompile Include="..\..\..\common\tracy_lz4.cpp" />
-    <ClCompile Include="..\..\..\common\tracy_lz4hc.cpp" />
     <ClCompile Include="..\..\..\imgui\imgui.cpp" />
     <ClCompile Include="..\..\..\imgui\imgui_demo.cpp" />
     <ClCompile Include="..\..\..\imgui\imgui_draw.cpp" />
@@ -117,6 +112,11 @@
     <ClCompile Include="..\..\..\imgui\imgui_widgets.cpp" />
     <ClCompile Include="..\..\..\imgui\misc\freetype\imgui_freetype.cpp" />
     <ClCompile Include="..\..\..\nfd\nfd_win.cpp" />
+    <ClCompile Include="..\..\..\public\common\TracySocket.cpp" />
+    <ClCompile Include="..\..\..\public\common\TracyStackFrames.cpp" />
+    <ClCompile Include="..\..\..\public\common\TracySystem.cpp" />
+    <ClCompile Include="..\..\..\public\common\tracy_lz4.cpp" />
+    <ClCompile Include="..\..\..\public\common\tracy_lz4hc.cpp" />
     <ClCompile Include="..\..\..\server\TracyBadVersion.cpp" />
     <ClCompile Include="..\..\..\server\TracyColor.cpp" />
     <ClCompile Include="..\..\..\server\TracyFilesystem.cpp" />
@@ -126,6 +126,7 @@
     <ClCompile Include="..\..\..\server\TracyMmap.cpp" />
     <ClCompile Include="..\..\..\server\TracyMouse.cpp" />
     <ClCompile Include="..\..\..\server\TracyPrint.cpp" />
+    <ClCompile Include="..\..\..\server\TracyProtoHistory.cpp" />
     <ClCompile Include="..\..\..\server\TracySourceContents.cpp" />
     <ClCompile Include="..\..\..\server\TracySourceTokenizer.cpp" />
     <ClCompile Include="..\..\..\server\TracySourceView.cpp" />
@@ -193,14 +194,18 @@
     <ClCompile Include="..\..\..\zstd\dictBuilder\divsufsort.c" />
     <ClCompile Include="..\..\..\zstd\dictBuilder\fastcover.c" />
     <ClCompile Include="..\..\..\zstd\dictBuilder\zdict.c" />
+    <ClCompile Include="..\..\src\BackendGlfw.cpp" />
+    <ClCompile Include="..\..\src\ConnectionHistory.cpp" />
+    <ClCompile Include="..\..\src\Filters.cpp" />
+    <ClCompile Include="..\..\src\Fonts.cpp" />
     <ClCompile Include="..\..\src\HttpRequest.cpp" />
-    <ClCompile Include="..\..\src\imgui_impl_glfw.cpp" />
-    <ClCompile Include="..\..\src\imgui_impl_opengl3.cpp" />
-    <ClCompile Include="..\..\src\main.cpp">
-      <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Disabled</Optimization>
-    </ClCompile>
-    <ClCompile Include="..\..\src\NativeWindow.cpp" />
+    <ClCompile Include="..\..\src\ImGuiContext.cpp" />
+    <ClCompile Include="..\..\src\imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="..\..\src\imgui\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="..\..\src\main.cpp" />
     <ClCompile Include="..\..\src\ResolvService.cpp" />
+    <ClCompile Include="..\..\src\RunQueue.cpp" />
+    <ClCompile Include="..\..\src\WindowPosition.cpp" />
     <ClCompile Include="..\..\src\winmain.cpp">
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotSet</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotSet</EnableEnhancedInstructionSet>
@@ -208,17 +213,6 @@
     <ClCompile Include="..\..\src\winmainArchDiscovery.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\..\common\TracyAlign.hpp" />
-    <ClInclude Include="..\..\..\common\TracyForceInline.hpp" />
-    <ClInclude Include="..\..\..\common\TracyMutex.hpp" />
-    <ClInclude Include="..\..\..\common\TracyProtocol.hpp" />
-    <ClInclude Include="..\..\..\common\TracyQueue.hpp" />
-    <ClInclude Include="..\..\..\common\TracySocket.hpp" />
-    <ClInclude Include="..\..\..\common\TracyStackFrames.hpp" />
-    <ClInclude Include="..\..\..\common\TracySystem.hpp" />
-    <ClInclude Include="..\..\..\common\TracyYield.hpp" />
-    <ClInclude Include="..\..\..\common\tracy_lz4.hpp" />
-    <ClInclude Include="..\..\..\common\tracy_lz4hc.hpp" />
     <ClInclude Include="..\..\..\imgui\imconfig.h" />
     <ClInclude Include="..\..\..\imgui\imgui.h" />
     <ClInclude Include="..\..\..\imgui\imgui_internal.h" />
@@ -227,7 +221,21 @@
     <ClInclude Include="..\..\..\imgui\imstb_truetype.h" />
     <ClInclude Include="..\..\..\imgui\misc\freetype\imgui_freetype.h" />
     <ClInclude Include="..\..\..\nfd\nfd.h" />
-    <ClInclude Include="..\..\..\server\helpers.h" />
+    <ClInclude Include="..\..\..\public\common\TracyAlign.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyAlloc.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyApi.h" />
+    <ClInclude Include="..\..\..\public\common\TracyColor.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyForceInline.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyMutex.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyProtocol.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyQueue.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracySocket.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyStackFrames.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracySystem.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyUwp.hpp" />
+    <ClInclude Include="..\..\..\public\common\TracyYield.hpp" />
+    <ClInclude Include="..\..\..\public\common\tracy_lz4.hpp" />
+    <ClInclude Include="..\..\..\public\common\tracy_lz4hc.hpp" />
     <ClInclude Include="..\..\..\server\IconsFontAwesome5.h" />
     <ClInclude Include="..\..\..\server\TracyBadVersion.hpp" />
     <ClInclude Include="..\..\..\server\TracyBuzzAnim.hpp" />
@@ -246,6 +254,7 @@
     <ClInclude Include="..\..\..\server\TracyMouse.hpp" />
     <ClInclude Include="..\..\..\server\TracyPopcnt.hpp" />
     <ClInclude Include="..\..\..\server\TracyPrint.hpp" />
+    <ClInclude Include="..\..\..\server\TracyProtoHistory.hpp" />
     <ClInclude Include="..\..\..\server\TracyShortPtr.hpp" />
     <ClInclude Include="..\..\..\server\TracySlab.hpp" />
     <ClInclude Include="..\..\..\server\TracySort.hpp" />
@@ -307,18 +316,24 @@
     <ClInclude Include="..\..\..\zstd\zdict.h" />
     <ClInclude Include="..\..\..\zstd\zstd.h" />
     <ClInclude Include="..\..\..\zstd\zstd_errors.h" />
-    <ClInclude Include="..\..\src\Arimo.hpp" />
-    <ClInclude Include="..\..\src\Cousine.hpp" />
-    <ClInclude Include="..\..\src\FiraCodeRetina.hpp" />
-    <ClInclude Include="..\..\src\FontAwesomeSolid.hpp" />
+    <ClInclude Include="..\..\src\Backend.hpp" />
+    <ClInclude Include="..\..\src\ConnectionHistory.hpp" />
+    <ClInclude Include="..\..\src\Filters.hpp" />
+    <ClInclude Include="..\..\src\Fonts.hpp" />
+    <ClInclude Include="..\..\src\font\DroidSans.hpp" />
+    <ClInclude Include="..\..\src\font\FiraCodeRetina.hpp" />
+    <ClInclude Include="..\..\src\font\FontAwesomeSolid.hpp" />
     <ClInclude Include="..\..\src\HttpRequest.hpp" />
     <ClInclude Include="..\..\src\icon.hpp" />
-    <ClInclude Include="..\..\src\imgui_impl_glfw.h" />
-    <ClInclude Include="..\..\src\imgui_impl_opengl3.h" />
-    <ClInclude Include="..\..\src\imgui_impl_opengl3_loader.h" />
-    <ClInclude Include="..\..\src\NativeWindow.hpp" />
+    <ClInclude Include="..\..\src\ImGuiContext.hpp" />
+    <ClInclude Include="..\..\src\imgui\imgui_impl_glfw.h" />
+    <ClInclude Include="..\..\src\imgui\imgui_impl_opengl3.h" />
+    <ClInclude Include="..\..\src\imgui\imgui_impl_opengl3_loader.h" />
     <ClInclude Include="..\..\src\ResolvService.hpp" />
+    <ClInclude Include="..\..\src\RunQueue.hpp" />
     <ClInclude Include="..\..\src\stb_image.h" />
+    <ClInclude Include="..\..\src\WindowPosition.hpp" />
+     <ClInclude Include="..\..\..\server\helpers.h" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />

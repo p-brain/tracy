@@ -1,6 +1,6 @@
 #include <inttypes.h>
 
-#include "../profiler/src/imgui_impl_opengl3_loader.h"
+#include "../profiler/src/imgui/imgui_impl_opengl3_loader.h"
 #include "TracyTexture.hpp"
 
 #ifndef COMPRESSED_RGB_S3TC_DXT1_EXT
@@ -33,6 +33,13 @@ void UpdateTexture( void* _tex, const char* data, int w, int h )
     auto tex = (GLuint)(intptr_t)_tex;
     glBindTexture( GL_TEXTURE_2D, tex );
     glCompressedTexImage2D( GL_TEXTURE_2D, 0, COMPRESSED_RGB_S3TC_DXT1_EXT, w, h, 0, w * h / 2, data );
+}
+
+void UpdateTextureRGBA( void* _tex, void* data, int w, int h )
+{
+    auto tex = (GLuint)(intptr_t)_tex;
+    glBindTexture( GL_TEXTURE_2D, tex );
+    glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
 }
 
 }

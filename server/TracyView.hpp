@@ -304,6 +304,7 @@ private:
 
     const ZoneEvent* GetZoneParent( const ZoneEvent& zone ) const;
     const ZoneEvent* GetZoneParent( const ZoneEvent& zone, uint64_t tid ) const;
+    const ZoneEvent* GetZoneChild( const ZoneEvent& zone, int64_t time ) const;
     bool IsZoneReentry( const ZoneEvent& zone ) const;
     bool IsZoneReentry( const ZoneEvent& zone, uint64_t tid ) const;
     const GpuEvent* GetZoneParent( const GpuEvent& zone ) const;
@@ -315,6 +316,8 @@ private:
     const ZoneEvent* FindZoneAtTime( uint64_t thread, int64_t time ) const;
     uint64_t GetFrameNumber( const FrameData& fd, int i, uint64_t offset ) const;
     const char* GetFrameText( const FrameData& fd, int i, uint64_t ftime, uint64_t offset ) const;
+    const char* GetFrameSetName( const FrameData& fd ) const;
+    static const char* GetFrameSetName( const FrameData& fd, const Worker& worker );
 
 #ifndef TRACY_NO_STATISTICS
     void FindZones();
@@ -323,6 +326,7 @@ private:
 
     std::vector<MemoryPage> GetMemoryPages() const;
     const char* GetPlotName( const PlotData* plot ) const;
+    uint32_t GetPlotColor( const PlotData* plot ) const;
 
     void SmallCallstackButton( const char* name, uint32_t callstack, int& idx, bool tooltip = true );
     void DrawCallstackCalls( uint32_t callstack, uint16_t limit ) const;
@@ -483,6 +487,7 @@ private:
     bool m_allocTimeRelativeToZone = true;
     bool m_ctxSwitchTimeRelativeToZone = true;
     bool m_messageTimeRelativeToZone = true;
+    bool m_messagesExcludeChildren = true;
     uint64_t m_zoneInfoMemPool = 0;
     int m_waitStack = 0;
     int m_waitStackMode = 0;
