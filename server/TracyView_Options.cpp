@@ -13,7 +13,7 @@
 namespace tracy
 {
 
-extern bool gb_reApplyThreadOrder;
+extern bool g_bReApplyThreadOrder;
 extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
 
 void View::DrawOptions()
@@ -702,7 +702,7 @@ void View::DrawOptions()
                 g_MapThreadNameToPriority[ threadName ] = i;
 			}
 
-            gb_reApplyThreadOrder = true;
+            g_bReApplyThreadOrder = true;
         }
     }
 

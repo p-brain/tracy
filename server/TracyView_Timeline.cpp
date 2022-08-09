@@ -10,6 +10,10 @@
 namespace tracy
 {
 
+extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
+extern bool g_bReApplyThreadOrder;
+
+
 enum { MinVisSize = 3 };
 
 extern double s_time;
@@ -584,7 +588,7 @@ void View::DrawTimeline()
 
     
     const auto& threadData = m_worker.GetThreadData();
-    if(gb_reApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
+    if(g_bReApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
     {
         if (( threadData.size() != m_threadOrder.size() ))
         {
@@ -594,9 +598,6 @@ void View::DrawTimeline()
                 m_threadOrder.push_back( threadData[ i ] );
             }
         }
-
-        extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-
 
         for (int i = 0; i < threadData.size(); i++)
         {         

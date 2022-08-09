@@ -309,10 +309,20 @@ void View::DrawZoneInfoWindow()
             const auto& slz = m_worker.GetZonesForSourceLocation( sl );
             if( !slz.zones.empty() )
             {
-                ImGui::SameLine();
-                if( ImGui::Button( ICON_FA_CHART_BAR " Statistics" ) )
+                static std::string oldName = "";
+                std::string newName = m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function );
+
+                if (oldName != newName)
                 {
-                    m_findZone.ShowZone( sl, m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+                    //ImGui::SameLine();
+                    //if( ImGui::Button( ICON_FA_CHART_BAR " Statistics" ) )
+                    {
+                        if (newName != oldName)
+                        {
+                            oldName = newName;
+                            m_findZone.ShowZone( sl, newName.c_str() );
+                        }
+                    }
                 }
             }
         }

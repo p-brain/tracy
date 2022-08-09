@@ -49,7 +49,7 @@ struct CSortedThreads
 extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
 
 
-extern bool gb_reApplyThreadOrder;
+extern bool g_bReApplyThreadOrder;
 
 class View
 {
