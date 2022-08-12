@@ -10,6 +10,10 @@
 namespace tracy
 {
 
+extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
+extern bool g_bReApplyThreadOrder;
+
+
 enum { MinVisSize = 3 };
 
 extern double s_time;
@@ -294,6 +298,11 @@ void View::DrawTimeline()
 
     const auto nspx = 1.0 / pxns;
 
+    ImGui::PushFont( m_smallFont );
+    const auto sty = ImGui::GetTextLineHeight();
+    const auto sstep = sty + 1;
+    ImGui::PopFont();
+
     const auto ty = ImGui::GetTextLineHeight();
     const auto ostep = ty + 1;
     int offset = 0;
@@ -318,11 +327,6 @@ void View::DrawTimeline()
             const auto yPos = AdjustThreadPosition( vis, wpos.y, offset );
             const auto oldOffset = offset;
             ImGui::PushClipRect( wpos, wpos + ImVec2( w, oldOffset + vis.height ), true );
-
-            ImGui::PushFont( m_smallFont );
-            const auto sty = ImGui::GetTextLineHeight();
-            const auto sstep = sty + 1;
-            ImGui::PopFont();
 
             const auto singleThread = v->threadData.size() == 1;
             int depth = 0;
@@ -584,7 +588,7 @@ void View::DrawTimeline()
 
     
     const auto& threadData = m_worker.GetThreadData();
-    if(gb_reApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
+    if(g_bReApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
     {
         if (( threadData.size() != m_threadOrder.size() ))
         {
@@ -594,9 +598,6 @@ void View::DrawTimeline()
                 m_threadOrder.push_back( threadData[ i ] );
             }
         }
-
-        extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-
 
         for (int i = 0; i < threadData.size(); i++)
         {         
@@ -696,7 +697,7 @@ void View::DrawTimeline()
             if( m_vd.drawLocks )
             {
                 const auto lockDepth = DrawLocks( v->id, hover, pxns, wpos, offset, nextLockHighlight, yMin, yMax );
-                offset += ostep * lockDepth;
+                offset += sstep * lockDepth;
                 depth += lockDepth;
             }
         }

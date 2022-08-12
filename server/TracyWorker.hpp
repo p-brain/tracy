@@ -13,10 +13,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../common/TracyForceInline.hpp"
-#include "../common/TracyQueue.hpp"
-#include "../common/TracyProtocol.hpp"
-#include "../common/TracySocket.hpp"
+#include "../public/common/TracyForceInline.hpp"
+#include "../public/common/TracyQueue.hpp"
+#include "../public/common/TracyProtocol.hpp"
+#include "../public/common/TracySocket.hpp"
 #include "tracy_robin_hood.h"
 #include "TracyEvent.hpp"
 #include "TracyShortPtr.hpp"
@@ -158,13 +158,13 @@ public:
         uint8_t inlineFrame;
     };
 
-#pragma pack( 1 )
+#pragma pack( push, 1 )
     struct GhostKey
     {
         CallstackFrameId frame;
         uint8_t inlineFrame;
     };
-#pragma pack()
+#pragma pack( pop )
 
     struct GhostKeyHasher
     {
@@ -683,6 +683,7 @@ private:
     tracy_force_inline void ProcessFrameMark( const QueueFrameMark& ev );
     tracy_force_inline void ProcessFrameMarkStart( const QueueFrameMark& ev );
     tracy_force_inline void ProcessFrameMarkEnd( const QueueFrameMark& ev );
+    tracy_force_inline void ProcessFrameVsync( const QueueFrameVsync& ev );
     tracy_force_inline void ProcessFrameImage( const QueueFrameImage& ev );
     tracy_force_inline void ProcessZoneText();
     tracy_force_inline void ProcessZoneName();
@@ -695,10 +696,12 @@ private:
     tracy_force_inline void ProcessLockRelease( const QueueLockRelease& ev );
     tracy_force_inline void ProcessLockSharedWait( const QueueLockWait& ev );
     tracy_force_inline void ProcessLockSharedObtain( const QueueLockObtain& ev );
-    tracy_force_inline void ProcessLockSharedRelease( const QueueLockRelease& ev );
+    tracy_force_inline void ProcessLockSharedRelease( const QueueLockReleaseShared& ev );
     tracy_force_inline void ProcessLockMark( const QueueLockMark& ev );
     tracy_force_inline void ProcessLockName( const QueueLockName& ev );
-    tracy_force_inline void ProcessPlotData( const QueuePlotData& ev );
+    tracy_force_inline void ProcessPlotDataInt( const QueuePlotDataInt& ev );
+    tracy_force_inline void ProcessPlotDataFloat( const QueuePlotDataFloat& ev );
+    tracy_force_inline void ProcessPlotDataDouble( const QueuePlotDataDouble& ev );
     tracy_force_inline void ProcessPlotConfig( const QueuePlotConfig& ev );
     tracy_force_inline void ProcessMessage( const QueueMessage& ev );
     tracy_force_inline void ProcessMessageLiteral( const QueueMessageLiteral& ev );
@@ -757,6 +760,7 @@ private:
     tracy_force_inline void ProcessGpuZoneBeginImpl( GpuEvent* zone, const QueueGpuZoneBegin& ev, bool serial );
     tracy_force_inline void ProcessGpuZoneBeginAllocSrcLocImpl( GpuEvent* zone, const QueueGpuZoneBeginLean& ev, bool serial );
     tracy_force_inline void ProcessGpuZoneBeginImplCommon( GpuEvent* zone, const QueueGpuZoneBeginLean& ev, bool serial );
+    tracy_force_inline void ProcessPlotDataImpl( uint64_t name, int64_t evTime, double val );
     tracy_force_inline MemEvent* ProcessMemAllocImpl( uint64_t memname, MemData& memdata, const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemFreeImpl( uint64_t memname, MemData& memdata, const QueueMemFree& ev );
     tracy_force_inline void ProcessCallstackSampleImpl( const SampleData& sd, ThreadData& td );
@@ -980,6 +984,7 @@ private:
     Vector<uint64_t> m_sourceLocationQueue;
     unordered_flat_map<uint64_t, int16_t> m_sourceLocationShrink;
     unordered_flat_map<uint64_t, ThreadData*> m_threadMap;
+    unordered_flat_map<uint32_t, FrameData*> m_vsyncFrameMap;
     FrameImagePending m_pendingFrameImageData = {};
     unordered_flat_map<uint64_t, SymbolPending> m_pendingSymbols;
     unordered_flat_set<StringRef, StringRefHasher, StringRefComparator> m_pendingFileStrings;

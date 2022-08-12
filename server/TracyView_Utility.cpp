@@ -1,3 +1,5 @@
+#include <inttypes.h>
+
 #include "TracyColor.hpp"
 #include "TracyPrint.hpp"
 #include "TracyView.hpp"
@@ -191,6 +193,27 @@ const ZoneEvent* View::FindZoneAtTime( uint64_t thread, int64_t time ) const
             if( !(*it)->HasChildren() ) return ret;
             timeline = &m_worker.GetZoneChildren( (*it)->Child() );
         }
+    }
+}
+
+const ZoneEvent* View::GetZoneChild( const ZoneEvent& zone, int64_t time ) const
+{
+    if( !zone.HasChildren() ) return nullptr;
+    auto& children = m_worker.GetZoneChildren( zone.Child() );
+    if( children.is_magic() )
+    {
+        auto& vec = *((Vector<ZoneEvent>*)&children);
+        auto it = std::upper_bound( vec.begin(), vec.end(), time, [] ( const auto& l, const auto& r ) { return l < r.Start(); } );
+        if( it != vec.begin() ) --it;
+        if( it->Start() > time || ( it->IsEndValid() && it->End() < time ) ) return nullptr;
+        return it;
+    }
+    else
+    {
+        auto it = std::upper_bound( children.begin(), children.end(), time, [] ( const auto& l, const auto& r ) { return l < r->Start(); } );
+        if( it != children.begin() ) --it;
+        if( (*it)->Start() > time || ( (*it)->IsEndValid() && (*it)->End() < time ) ) return nullptr;
+        return *it;
     }
 }
 
@@ -770,9 +793,37 @@ const char* View::GetFrameText( const FrameData& fd, int i, uint64_t ftime, uint
     }
     else
     {
-        sprintf( buf, "%s %s (%s)", m_worker.GetString( fd.name ), RealToString( fnum ), TimeToString( ftime ) );
+        sprintf( buf, "%s %s (%s)", GetFrameSetName( fd ), RealToString( fnum ), TimeToString( ftime ) );
     }
     return buf;
+}
+
+const char* View::GetFrameSetName( const FrameData& fd ) const
+{
+    return GetFrameSetName( fd, m_worker );
+}
+
+const char* View::GetFrameSetName( const FrameData& fd, const Worker& worker )
+{
+    enum { Pool = 4 };
+    static char bufpool[Pool][64];
+    static int bufsel = 0;
+
+    if( fd.name == 0 )
+    {
+        return "Frames";
+    }
+    else if( fd.name >> 63 != 0 )
+    {
+        char* buf = bufpool[bufsel];
+        bufsel = ( bufsel + 1 ) % Pool;
+        sprintf( buf, "[%" PRIu32 "] Vsync", uint32_t( fd.name ) );
+        return buf;
+    }
+    else
+    {
+        return worker.GetString( fd.name );
+    }
 }
 
 const char* View::ShortenNamespace( const char* name ) const

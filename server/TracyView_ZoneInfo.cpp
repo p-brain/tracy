@@ -309,10 +309,20 @@ void View::DrawZoneInfoWindow()
             const auto& slz = m_worker.GetZonesForSourceLocation( sl );
             if( !slz.zones.empty() )
             {
-                ImGui::SameLine();
-                if( ImGui::Button( ICON_FA_CHART_BAR " Statistics" ) )
+                static std::string oldName = "";
+                std::string newName = m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function );
+
+                if (oldName != newName)
                 {
-                    m_findZone.ShowZone( sl, m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+                    //ImGui::SameLine();
+                    //if( ImGui::Button( ICON_FA_CHART_BAR " Statistics" ) )
+                    {
+                        if (newName != oldName)
+                        {
+                            oldName = newName;
+                            m_findZone.ShowZone( sl, newName.c_str() );
+                        }
+                    }
                 }
             }
         }
@@ -878,6 +888,8 @@ void View::DrawZoneInfoWindow()
                     {
                         ImGui::SameLine();
                         SmallCheckbox( "Time relative to zone start", &m_messageTimeRelativeToZone );
+                        ImGui::SameLine();
+                        SmallCheckbox( "Exclude children", &m_messagesExcludeChildren );
                         if( ImGui::BeginTable( "##messages", 2, ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV, ImVec2( 0, ImGui::GetTextLineHeightWithSpacing() * std::min<int64_t>( msgend-msgit+1, 15 ) ) ) )
                         {
                             ImGui::TableSetupScrollFreeze( 0, 1 );
@@ -886,6 +898,7 @@ void View::DrawZoneInfoWindow()
                             ImGui::TableHeadersRow();
                             do
                             {
+                                if( m_messagesExcludeChildren && GetZoneChild( ev, (*msgit)->time ) ) continue;
                                 ImGui::PushID( *msgit );
                                 ImGui::TableNextRow();
                                 ImGui::TableNextColumn();

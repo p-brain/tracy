@@ -11,7 +11,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
-#include "../common/TracyForceInline.hpp"
+#include "../public/common/TracyForceInline.hpp"
 #include "IconsFontAwesome5.h"
 
 #if !IMGUI_DEFINE_MATH_OPERATORS
@@ -57,6 +57,12 @@ static constexpr const ImVec4 SyntaxColorsDimmed[] = {
 [[maybe_unused]] static inline float GetScale()
 {
     return ImGui::GetTextLineHeight() / 15.f;
+}
+
+[[maybe_unused]] static inline void ImageCentered( ImTextureID user_texture_id, const ImVec2& size )
+{
+    ImGui::SetCursorPosX( ( ImGui::GetWindowWidth() - size.x ) * 0.5f );
+    ImGui::Image( user_texture_id, size );
 }
 
 [[maybe_unused]] static inline void TextCentered( const char* text )

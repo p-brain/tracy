@@ -1,5 +1,6 @@
 #include <inttypes.h>
 
+#include "TracyColor.hpp"
 #include "TracyImGui.hpp"
 #include "TracyMouse.hpp"
 #include "TracyPrint.hpp"
@@ -30,6 +31,23 @@ const char* View::GetPlotName( const PlotData* plot ) const
     default:
         assert( false );
         return nullptr;
+    }
+}
+
+uint32_t View::GetPlotColor( const PlotData* plot ) const
+{
+    switch( plot->type )
+    {
+    case PlotType::User:
+        if( plot->color != 0 ) return plot->color | 0xFF000000;
+        return GetHsvColor( charutil::hash( m_worker.GetString( plot->name ) ), -10 );
+    case PlotType::Memory:
+        return 0xFF2266CC;
+    case PlotType::SysTime:
+        return 0xFFBAB220;
+    default:
+        assert( false );
+        return 0;
     }
 }
 
@@ -103,7 +121,9 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( 0, offset ), wpos + ImVec2( ty + txtx, offset + ty ) ) )
             {
                 ImGui::BeginTooltip();
-                ImGui::Text( "Plot \"%s\"", txt );
+                SmallColorBox( GetPlotColor( v ) );
+                ImGui::SameLine();
+                TextFocused( "Plot", txt );
                 ImGui::Separator();
 
                 const auto first = v->data.front().time.Val();
@@ -155,44 +175,11 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                 auto& vec = v->data;
                 vec.ensure_sorted();
 
-                if( v->type == PlotType::Memory )
-                {
-                    auto& mem = m_worker.GetMemoryNamed( v->name );
+                const auto color = GetPlotColor( v );
+                const auto bg = 0x22000000 | ( DarkenColorMore( color ) & 0xFFFFFF );
+                const auto fill = 0x22000000 | ( DarkenColor( color ) & 0xFFFFFF );
 
-                    if( m_memoryAllocInfoPool == v->name && m_memoryAllocInfoWindow >= 0 )
-                    {
-                        const auto& ev = mem.data[m_memoryAllocInfoWindow];
-
-                        const auto tStart = ev.TimeAlloc();
-                        const auto tEnd = ev.TimeFree() < 0 ? m_worker.GetLastTime() : ev.TimeFree();
-
-                        const auto px0 = ( tStart - m_vd.zvStart ) * pxns;
-                        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( tEnd - m_vd.zvStart ) * pxns );
-                        draw->AddRectFilled( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x2288DD88 );
-                        draw->AddRect( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x4488DD88 );
-                    }
-                    if( m_memoryAllocHover >= 0 && m_memoryAllocHoverPool == v->name && ( m_memoryAllocInfoPool != v->name || m_memoryAllocHover != m_memoryAllocInfoWindow ) )
-                    {
-                        const auto& ev = mem.data[m_memoryAllocHover];
-
-                        const auto tStart = ev.TimeAlloc();
-                        const auto tEnd = ev.TimeFree() < 0 ? m_worker.GetLastTime() : ev.TimeFree();
-
-                        const auto px0 = ( tStart - m_vd.zvStart ) * pxns;
-                        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( tEnd - m_vd.zvStart ) * pxns );
-                        draw->AddRectFilled( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x228888DD );
-                        draw->AddRect( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x448888DD );
-
-                        if( m_memoryAllocHoverWait > 0 )
-                        {
-                            m_memoryAllocHoverWait--;
-                        }
-                        else
-                        {
-                            m_memoryAllocHover = -1;
-                        }
-                    }
-                }
+                draw->AddRectFilled( ImVec2( 0, yPos ), ImVec2( w, yPos + PlotHeight ), bg );
 
                 auto it = std::lower_bound( vec.begin(), vec.end(), m_vd.zvStart - m_worker.GetDelay(), [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
                 auto end = std::lower_bound( it, vec.end(), m_vd.zvEnd + m_worker.GetResolution(), [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
@@ -259,7 +246,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                 {
                     const auto x = ( it->time.Val() - m_vd.zvStart ) * pxns;
                     const auto y = PlotHeight - ( it->val - min ) * revrange * PlotHeight;
-                    DrawPlotPoint( wpos, x, y, offset, 0xFF44DDDD, hover, false, it, 0, false, v->type, v->format, PlotHeight, v->name );
+                    DrawPlotPoint( wpos, x, y, offset, color, hover, false, it, 0, false, v->type, v->format, PlotHeight, v->name );
                 }
 
                 auto prevx = it;
@@ -273,7 +260,23 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                     const auto y0 = PlotHeight - ( prevy->val - min ) * revrange * PlotHeight;
                     const auto y1 = PlotHeight - ( it->val - min ) * revrange * PlotHeight;
 
-                    DrawLine( draw, dpos + ImVec2( x0, offset + y0 ), dpos + ImVec2( x1, offset + y1 ), 0xFF44DDDD );
+                    if( v->showSteps )
+                    {
+                        if( v->fill )
+                        {
+                            draw->AddRectFilled( dpos + ImVec2( x0, offset + PlotHeight ), dpos + ImVec2( x1, offset + y0 ), fill );
+                        }
+                        const ImVec2 data[3] = { dpos + ImVec2( x0, offset + y0 ), dpos + ImVec2( x1, offset + y0 ), dpos + ImVec2( x1, offset + y1 ) };
+                        draw->AddPolyline( data, 3, color, 0, 1.0f );
+                    }
+                    else
+                    {
+                        if( v->fill )
+                        {
+                            draw->AddQuadFilled( dpos + ImVec2( x0, offset + PlotHeight ), dpos + ImVec2( x0, offset + y0 ), dpos + ImVec2( x1, offset + y1 ), dpos + ImVec2( x1, offset + PlotHeight ), fill );
+                        }
+                        DrawLine( draw, dpos + ImVec2( x0, offset + y0 ), dpos + ImVec2( x1, offset + y1 ), color );
+                    }
 
                     const auto rx = skip == 0 ? 2.0 : ( skip == 1 ? 2.5 : 4.0 );
 
@@ -282,7 +285,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                     const auto rsz = std::distance( it, range );
                     if( rsz == 1 )
                     {
-                        DrawPlotPoint( wpos, x1, y1, offset, 0xFF44DDDD, hover, true, it, prevy->val, false, v->type, v->format, PlotHeight, v->name );
+                        DrawPlotPoint( wpos, x1, y1, offset, color, hover, true, it, prevy->val, false, v->type, v->format, PlotHeight, v->name );
                         prevx = it;
                         prevy = it;
                         ++it;
@@ -308,7 +311,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
 
                         if( rsz > MaxPoints )
                         {
-                            DrawLine( draw, dpos + ImVec2( x1, offset + PlotHeight - ( tmpvec[0] - min ) * revrange * PlotHeight ), dpos + ImVec2( x1, offset + PlotHeight - ( dst[-1] - min ) * revrange * PlotHeight ), 0xFF44DDDD, 4.f );
+                            DrawLine( draw, dpos + ImVec2( x1, offset + PlotHeight - ( tmpvec[0] - min ) * revrange * PlotHeight ), dpos + ImVec2( x1, offset + PlotHeight - ( dst[-1] - min ) * revrange * PlotHeight ), color, 4.f );
 
                             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( x1 - 2, offset ), wpos + ImVec2( x1 + 2, offset + PlotHeight ) ) )
                             {
@@ -324,7 +327,7 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                         }
                         else
                         {
-                            DrawLine( draw, dpos + ImVec2( x1, offset + PlotHeight - ( tmpvec[0] - min ) * revrange * PlotHeight ), dpos + ImVec2( x1, offset + PlotHeight - ( dst[-1] - min ) * revrange * PlotHeight ), 0xFF44DDDD );
+                            DrawLine( draw, dpos + ImVec2( x1, offset + PlotHeight - ( tmpvec[0] - min ) * revrange * PlotHeight ), dpos + ImVec2( x1, offset + PlotHeight - ( dst[-1] - min ) * revrange * PlotHeight ), color );
 
                             auto vit = tmpvec;
                             while( vit != dst )
@@ -333,17 +336,56 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                                 assert( vrange > vit );
                                 if( std::distance( vit, vrange ) == 1 )
                                 {
-                                    DrawPlotPoint( wpos, x1, PlotHeight - ( *vit - min ) * revrange * PlotHeight, offset, 0xFF44DDDD, hover, false, *vit, 0, false, v->format, PlotHeight );
+                                    DrawPlotPoint( wpos, x1, PlotHeight - ( *vit - min ) * revrange * PlotHeight, offset, color, hover, false, *vit, 0, false, v->format, PlotHeight );
                                 }
                                 else
                                 {
-                                    DrawPlotPoint( wpos, x1, PlotHeight - ( *vit - min ) * revrange * PlotHeight, offset, 0xFF44DDDD, hover, false, *vit, 0, true, v->format, PlotHeight );
+                                    DrawPlotPoint( wpos, x1, PlotHeight - ( *vit - min ) * revrange * PlotHeight, offset, color, hover, false, *vit, 0, true, v->format, PlotHeight );
                                 }
                                 vit = vrange;
                             }
                         }
 
                         prevy = it - 1;
+                    }
+                }
+
+                if( v->type == PlotType::Memory )
+                {
+                    auto& mem = m_worker.GetMemoryNamed( v->name );
+
+                    if( m_memoryAllocInfoPool == v->name && m_memoryAllocInfoWindow >= 0 )
+                    {
+                        const auto& ev = mem.data[m_memoryAllocInfoWindow];
+
+                        const auto tStart = ev.TimeAlloc();
+                        const auto tEnd = ev.TimeFree() < 0 ? m_worker.GetLastTime() : ev.TimeFree();
+
+                        const auto px0 = ( tStart - m_vd.zvStart ) * pxns;
+                        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( tEnd - m_vd.zvStart ) * pxns );
+                        draw->AddRectFilled( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x2288DD88 );
+                        draw->AddRect( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x4488DD88 );
+                    }
+                    if( m_memoryAllocHover >= 0 && m_memoryAllocHoverPool == v->name && ( m_memoryAllocInfoPool != v->name || m_memoryAllocHover != m_memoryAllocInfoWindow ) )
+                    {
+                        const auto& ev = mem.data[m_memoryAllocHover];
+
+                        const auto tStart = ev.TimeAlloc();
+                        const auto tEnd = ev.TimeFree() < 0 ? m_worker.GetLastTime() : ev.TimeFree();
+
+                        const auto px0 = ( tStart - m_vd.zvStart ) * pxns;
+                        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( tEnd - m_vd.zvStart ) * pxns );
+                        draw->AddRectFilled( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x228888DD );
+                        draw->AddRect( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x448888DD );
+
+                        if( m_memoryAllocHoverWait > 0 )
+                        {
+                            m_memoryAllocHoverWait--;
+                        }
+                        else
+                        {
+                            m_memoryAllocHover = -1;
+                        }
                     }
                 }
 
@@ -354,10 +396,10 @@ int View::DrawPlots( int offset, double pxns, const ImVec2& wpos, bool hover, fl
                     draw->AddText( wpos + ImVec2( ty * 1.5f + txtx, offset - ty ), 0xFF226E6E, tmp );
                 }
                 auto tmp = FormatPlotValue( rMax, v->format );
-                DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), 0xFF44DDDD, tmp );
+                DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
                 offset += PlotHeight - ty;
                 tmp = FormatPlotValue( rMin, v->format );
-                DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), 0xFF44DDDD, tmp );
+                DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
 
                 DrawLine( draw, dpos + ImVec2( 0, offset + ty - 1 ), dpos + ImVec2( w, offset + ty - 1 ), 0xFF226E6E );
                 offset += ty;
