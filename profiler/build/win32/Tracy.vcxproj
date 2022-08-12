@@ -196,9 +196,7 @@
     <ClCompile Include="..\..\src\HttpRequest.cpp" />
     <ClCompile Include="..\..\src\imgui_impl_glfw.cpp" />
     <ClCompile Include="..\..\src\imgui_impl_opengl3.cpp" />
-    <ClCompile Include="..\..\src\main.cpp">
-      <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Disabled</Optimization>
-    </ClCompile>
+    <ClCompile Include="..\..\src\main.cpp" />
     <ClCompile Include="..\..\src\NativeWindow.cpp" />
     <ClCompile Include="..\..\src\ResolvService.cpp" />
     <ClCompile Include="..\..\src\winmain.cpp">
