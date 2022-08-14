@@ -70,6 +70,7 @@ using namespace rapidjson;
 #include "ResolvService.hpp"
 #include "RunQueue.hpp"
 
+#include "GetMainWindowHandle.h"
 
 struct ClientData
 {
@@ -328,6 +329,9 @@ int main( int argc, char** argv )
             {
                 Document d;
                 d.SetObject();
+
+                // Write out thread order
+
                 Value threadorder( kObjectType );
                 d.AddMember( "ThreadOrder", threadorder, d.GetAllocator() );
 
@@ -335,6 +339,12 @@ int main( int argc, char** argv )
                 {
                     d[ "ThreadOrder" ].AddMember( Value( kStringType ).SetString( it.first, d.GetAllocator() ), it.second, d.GetAllocator());
                 }
+
+                // Write out other options
+                
+
+
+                // Pretty write file
 
                 char writeBuffer[ 65536 ];
                 FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
@@ -755,6 +765,17 @@ static void DrawContents()
                 }
                 if( selected && !loadThread.joinable() )
                 {
+                    // if the IP is localhost or 127.0.0.1, let's give the target foreground/focus/not minimise
+
+                    HWND hTargetWin = find_main_window( v.second)
+
+
+
+                    std::string cmd;
+                    `cmd += "powershell showprocess.ps1 " + v.second.procName;
+                    cmd = std::regex_replace( cmd, std::regex( "\.exe" ), "" );
+                    system(cmd.c_str());
+
                     view = std::make_unique<tracy::View>( RunOnMainThread, v.second.address.c_str(), v.second.port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
                 }
                 ImGui::NextColumn();

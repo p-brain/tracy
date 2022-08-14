@@ -198,6 +198,7 @@
     <ClCompile Include="..\..\src\ConnectionHistory.cpp" />
     <ClCompile Include="..\..\src\Filters.cpp" />
     <ClCompile Include="..\..\src\Fonts.cpp" />
+    <ClCompile Include="..\..\src\GetMainWindowHandle.cpp" />
     <ClCompile Include="..\..\src\HttpRequest.cpp" />
     <ClCompile Include="..\..\src\ImGuiContext.cpp" />
     <ClCompile Include="..\..\src\imgui\imgui_impl_glfw.cpp" />
@@ -323,6 +324,7 @@
     <ClInclude Include="..\..\src\font\DroidSans.hpp" />
     <ClInclude Include="..\..\src\font\FiraCodeRetina.hpp" />
     <ClInclude Include="..\..\src\font\FontAwesomeSolid.hpp" />
+    <ClInclude Include="..\..\src\GetMainWindowHandle.h" />
     <ClInclude Include="..\..\src\HttpRequest.hpp" />
     <ClInclude Include="..\..\src\icon.hpp" />
     <ClInclude Include="..\..\src\ImGuiContext.hpp" />
@@ -333,7 +335,7 @@
     <ClInclude Include="..\..\src\RunQueue.hpp" />
     <ClInclude Include="..\..\src\stb_image.h" />
     <ClInclude Include="..\..\src\WindowPosition.hpp" />
-     <ClInclude Include="..\..\..\server\helpers.h" />
+    <ClInclude Include="..\..\..\server\helpers.h" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />
