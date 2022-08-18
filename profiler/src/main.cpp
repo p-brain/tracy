@@ -46,7 +46,7 @@
 #include "../../server/TracyWeb.hpp"
 #include "../../server/TracyWorker.hpp"
 #include "../../server/TracyVersion.hpp"
-#include "../../server/IconsFontAwesome5.h"
+#include "../../server/IconsFontAwesome6.h"
 
 #include "icon.hpp"
 
@@ -130,11 +130,6 @@ static void SetWindowTitleCallback( const char* title )
     sprintf( tmp, "%s - Tracy Profiler %i.%i.%i", title, tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch );
     bptr->SetTitle( tmp );
     s_customTitle = true;
-}
-
-static void* GetMainWindowNative()
-{
-    return bptr->GetNativeWindow();
 }
 
 static void DrawContents();
@@ -292,12 +287,12 @@ int main( int argc, char** argv )
 
     if( initFileOpen )
     {
-        view = std::make_unique<tracy::View>( RunOnMainThread, *initFileOpen, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+        view = std::make_unique<tracy::View>( RunOnMainThread, *initFileOpen, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
         initFileOpen.reset();
     }
     else if( connectTo )
     {
-        view = std::make_unique<tracy::View>( RunOnMainThread, connectTo, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+        view = std::make_unique<tracy::View>( RunOnMainThread, connectTo, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
     }
 
 #ifndef TRACY_NO_FILESELECTOR
@@ -503,13 +498,13 @@ static void DrawContents()
             tracy::OpenWebpage( "https://github.com/wolfpld/tracy/releases" );
         }
         ImGui::SameLine();
-        if( ImGui::Button( ICON_FA_GLOBE_AMERICAS " Web" ) )
+        if( ImGui::Button( ICON_FA_EARTH_AMERICAS " Web" ) )
         {
             ImGui::OpenPopup( "web" );
         }
         if( ImGui::BeginPopup( "web" ) )
         {
-            if( ImGui::Selectable( ICON_FA_HOME " Tracy Profiler home page" ) )
+            if( ImGui::Selectable( ICON_FA_HOUSE_CHIMNEY " Tracy Profiler home page" ) )
             {
                 tracy::OpenWebpage( "https://github.com/wolfpld/tracy" );
             }
@@ -616,11 +611,11 @@ static void DrawContents()
             {
                 std::string addrPart = std::string( addr, ptr );
                 uint16_t portPart = (uint16_t)atoi( ptr+1 );
-                view = std::make_unique<tracy::View>( RunOnMainThread, addrPart.c_str(), portPart, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+                view = std::make_unique<tracy::View>( RunOnMainThread, addrPart.c_str(), portPart, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
             }
             else
             {
-                view = std::make_unique<tracy::View>( RunOnMainThread, addr, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+                view = std::make_unique<tracy::View>( RunOnMainThread, addr, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
             }
         }
         ImGui::SameLine( 0, ImGui::GetTextLineHeight() * 2 );
@@ -641,7 +636,7 @@ static void DrawContents()
                         loadThread = std::thread( [f] {
                             try
                             {
-                                view = std::make_unique<tracy::View>( RunOnMainThread, *f, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+                                view = std::make_unique<tracy::View>( RunOnMainThread, *f, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
                             }
                             catch( const tracy::UnsupportedVersion& e )
                             {
@@ -684,12 +679,12 @@ static void DrawContents()
             if( filt->IsActive() )
             {
                 ImGui::SameLine();
-                tracy::TextColoredUnformatted( 0xFF00FFFF, ICON_FA_EXCLAMATION_TRIANGLE );
+                tracy::TextColoredUnformatted( 0xFF00FFFF, ICON_FA_TRIANGLE_EXCLAMATION );
                 tracy::TooltipIfHovered( "Filters are active" );
                 if( showFilter )
                 {
                     ImGui::SameLine();
-                    if( ImGui::SmallButton( ICON_FA_BACKSPACE " Clear" ) )
+                    if( ImGui::SmallButton( ICON_FA_DELETE_LEFT " Clear" ) )
                     {
                         filt->Clear();
                     }
@@ -776,7 +771,7 @@ static void DrawContents()
                     cmd = std::regex_replace( cmd, std::regex( "\.exe" ), "" );
                     system(cmd.c_str());
 
-                    view = std::make_unique<tracy::View>( RunOnMainThread, v.second.address.c_str(), v.second.port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+                    view = std::make_unique<tracy::View>( RunOnMainThread, v.second.address.c_str(), v.second.port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
                 }
                 ImGui::NextColumn();
                 const auto acttime = ( v.second.activeTime + ( time - v.second.time ) / 1000 ) * 1000000000ll;
@@ -945,7 +940,7 @@ static void DrawContents()
         viewShutdown.store( ViewShutdown::False, std::memory_order_relaxed );
         if( reconnect )
         {
-            view = std::make_unique<tracy::View>( RunOnMainThread, reconnectAddr.c_str(), reconnectPort, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, GetMainWindowNative, SetupScaleCallback );
+            view = std::make_unique<tracy::View>( RunOnMainThread, reconnectAddr.c_str(), reconnectPort, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
         }
         break;
     default:

@@ -135,7 +135,9 @@
     <ClCompile Include="..\..\..\server\TracyTexture.cpp" />
     <ClCompile Include="..\..\..\server\TracyTextureCompression.cpp" />
     <ClCompile Include="..\..\..\server\TracyThreadCompress.cpp" />
+    <ClCompile Include="..\..\..\server\TracyTimelineController.cpp" />
     <ClCompile Include="..\..\..\server\TracyUserData.cpp" />
+    <ClCompile Include="..\..\..\server\TracyUtility.cpp" />
     <ClCompile Include="..\..\..\server\TracyView.cpp" />
     <ClCompile Include="..\..\..\server\TracyView_Annotations.cpp" />
     <ClCompile Include="..\..\..\server\TracyView_Callstack.cpp" />
@@ -237,7 +239,7 @@
     <ClInclude Include="..\..\..\public\common\TracyYield.hpp" />
     <ClInclude Include="..\..\..\public\common\tracy_lz4.hpp" />
     <ClInclude Include="..\..\..\public\common\tracy_lz4hc.hpp" />
-    <ClInclude Include="..\..\..\server\IconsFontAwesome5.h" />
+    <ClInclude Include="..\..\..\server\IconsFontAwesome6.h" />
     <ClInclude Include="..\..\..\server\TracyBadVersion.hpp" />
     <ClInclude Include="..\..\..\server\TracyBuzzAnim.hpp" />
     <ClInclude Include="..\..\..\server\TracyCharUtil.hpp" />
@@ -269,7 +271,9 @@
     <ClInclude Include="..\..\..\server\TracyTexture.hpp" />
     <ClInclude Include="..\..\..\server\TracyTextureCompression.hpp" />
     <ClInclude Include="..\..\..\server\TracyThreadCompress.hpp" />
+    <ClInclude Include="..\..\..\server\TracyTimelineController.hpp" />
     <ClInclude Include="..\..\..\server\TracyUserData.hpp" />
+    <ClInclude Include="..\..\..\server\TracyUtility.hpp" />
     <ClInclude Include="..\..\..\server\TracyVarArray.hpp" />
     <ClInclude Include="..\..\..\server\TracyVector.hpp" />
     <ClInclude Include="..\..\..\server\TracyVersion.hpp" />

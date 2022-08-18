@@ -132,6 +132,8 @@ void DrawZoneTrace( T zone, const std::vector<T>& trace, const Worker& worker, B
     ImGui::TextDisabled( "(%s)", RealToString( trace.size() ) );
     if( !expand ) return;
 
+    const auto shortenName = view.GetShortenName();
+
     ImGui::SameLine();
     SmallCheckbox( "Show unknown frames", &showUnknownFrames );
 
@@ -186,7 +188,10 @@ void DrawZoneTrace( T zone, const std::vector<T>& trace, const Worker& worker, B
                     auto frame = frameData->data + frameData->size - 1;
                     ImGui::TextDisabled( "%i.", fidx++ );
                     ImGui::SameLine();
-                    TextDisabledUnformatted( worker.GetString( frame->name ) );
+                    const auto frameName = worker.GetString( frame->name );
+                    const auto normalized = shortenName != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, frameName ) : frameName;
+                    TextDisabledUnformatted( normalized );
+                    TooltipNormalizedName( frameName, normalized );
                     ImGui::SameLine();
                     ImGui::Spacing();
                     if( anim.Match( frame ) )
@@ -237,7 +242,10 @@ void DrawZoneTrace( T zone, const std::vector<T>& trace, const Worker& worker, B
             auto frame = frameData->data + frameData->size - 1;
             ImGui::TextDisabled( "%i.", fidx++ );
             ImGui::SameLine();
-            TextDisabledUnformatted( worker.GetString( frame->name ) );
+            const auto frameName = worker.GetString( frame->name );
+            const auto normalized = shortenName != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, frameName ) : frameName;
+            TextDisabledUnformatted( normalized );
+            TooltipNormalizedName( frameName, normalized );
             ImGui::SameLine();
             ImGui::Spacing();
             if( anim.Match( frame ) )
@@ -354,7 +362,7 @@ void View::DrawZoneInfoWindow()
             {
                 SetButtonHighlightColor();
             }
-            if( ImGui::Button( ICON_FA_FILE_ALT " Source" ) )
+            if( ImGui::Button( ICON_FA_FILE_LINES " Source" ) )
             {
                 ViewSource( fileName, srcloc.line );
             }
@@ -683,7 +691,7 @@ void View::DrawZoneInfoWindow()
                                         }
                                         else
                                         {
-                                            ImGui::Text( "%i " ICON_FA_LONG_ARROW_ALT_RIGHT " %i", cpu0, cpu1 );
+                                            ImGui::Text( "%i " ICON_FA_RIGHT_LONG " %i", cpu0, cpu1 );
                                             const auto tt0 = m_worker.GetThreadTopology( cpu0 );
                                             const auto tt1 = m_worker.GetThreadTopology( cpu1 );
                                             if( tt0 && tt1 )
@@ -730,7 +738,7 @@ void View::DrawZoneInfoWindow()
         if( memNameMap.size() > 1 )
         {
             ImGui::AlignTextToFramePadding();
-            TextDisabledUnformatted( ICON_FA_ARCHIVE " Memory pool:" );
+            TextDisabledUnformatted( ICON_FA_BOX_ARCHIVE " Memory pool:" );
             ImGui::SameLine();
             if( ImGui::BeginCombo( "##memoryPool", m_zoneInfoMemPool == 0 ? "Default allocator" : m_worker.GetString( m_zoneInfoMemPool ) ) )
             {
@@ -1412,7 +1420,7 @@ void View::DrawGpuInfoWindow()
             {
                 SetButtonHighlightColor();
             }
-            if( ImGui::Button( ICON_FA_FILE_ALT " Source" ) )
+            if( ImGui::Button( ICON_FA_FILE_LINES " Source" ) )
             {
                 ViewSource( fileName, srcloc.line );
             }

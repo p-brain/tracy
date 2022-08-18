@@ -68,7 +68,7 @@ void View::DrawOptions()
     {
         ImGui::Separator();
         val = m_vd.drawContextSwitches;
-        ImGui::Checkbox( ICON_FA_HIKING " Draw context switches", &val );
+        ImGui::Checkbox( ICON_FA_PERSON_HIKING " Draw context switches", &val );
         m_vd.drawContextSwitches = val;
         ImGui::Indent();
         val = m_vd.darkenContextSwitches;
@@ -76,7 +76,7 @@ void View::DrawOptions()
         m_vd.darkenContextSwitches = val;
         ImGui::Unindent();
         val = m_vd.drawCpuData;
-        ImGui::Checkbox( ICON_FA_SLIDERS_H " Draw CPU data", &val );
+        ImGui::Checkbox( ICON_FA_SLIDERS " Draw CPU data", &val );
         m_vd.drawCpuData = val;
         ImGui::Indent();
         val = m_vd.drawCpuUsageGraph;
@@ -235,16 +235,18 @@ void View::DrawOptions()
     ImGui::PopStyleVar();
     ImGui::Unindent();
     m_vd.dynamicColors = ival;
-    ival = (int)m_namespace;
-    ImGui::TextUnformatted( ICON_FA_BOX_OPEN " Namespaces" );
+    ival = (int)m_shortenName;
+    ImGui::TextUnformatted( ICON_FA_RULER_HORIZONTAL " Zone name shortening" );
     ImGui::Indent();
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
-    ImGui::RadioButton( "Full", &ival, 0 );
-    ImGui::RadioButton( "Shortened", &ival, 1 );
-    ImGui::RadioButton( "None", &ival, 2 );
+    ImGui::RadioButton( "Disabled", &ival, 0 );
+    ImGui::RadioButton( "Minimal length", &ival, 1 );
+    ImGui::RadioButton( "Only normalize", &ival, 2 );
+    ImGui::RadioButton( "As needed", &ival, 3 );
+    ImGui::RadioButton( "As needed + normalize", &ival, 4 );
     ImGui::PopStyleVar();
     ImGui::Unindent();
-    m_namespace = (Namespace)ival;
+    m_shortenName = (ShortenName)ival;
     ImGui::Unindent();
 
     if( !m_worker.GetLockMap().empty() )
@@ -585,7 +587,7 @@ void View::DrawOptions()
     }
 
     ImGui::Separator();
-    auto expand = ImGui::TreeNode( ICON_FA_RANDOM " Visible threads:" );
+    auto expand = ImGui::TreeNode( ICON_FA_SHUFFLE " Visible threads:" );
     ImGui::SameLine();
     ImGui::TextDisabled( "(%zu)", m_threadOrder.size() );
     if( expand )
@@ -627,7 +629,7 @@ void View::DrawOptions()
             if( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
             {
                 ImGui::SetDragDropPayload( "ThreadOrder", &idx, sizeof(int) );
-                ImGui::TextUnformatted( ICON_FA_RANDOM );
+                ImGui::TextUnformatted( ICON_FA_SHUFFLE );
                 ImGui::SameLine();
                 SmallColorBox( threadColor );
                 ImGui::SameLine();

@@ -16,7 +16,9 @@
 #include "TracyFileWrite.hpp"
 #include "TracyShortPtr.hpp"
 #include "TracySourceContents.hpp"
+#include "TracyTimelineController.hpp"
 #include "TracyUserData.hpp"
+#include "TracyUtility.hpp"
 #include "TracyVector.hpp"
 #include "TracyViewData.hpp"
 #include "TracyWorker.hpp"
@@ -107,12 +109,11 @@ public:
     };
 
     using SetTitleCallback = void(*)( const char* );
-    using GetWindowCallback = void*(*)();
     using SetScaleCallback = void(*)( float, ImFont*&, ImFont*&, ImFont*& );
 
-    View( void(*cbMainThread)(std::function<void()>, bool), ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr, SetScaleCallback sscb = nullptr ) : View( cbMainThread, "127.0.0.1", 8086, fixedWidth, smallFont, bigFont, stcb, gwcb, sscb ) {}
-    View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, uint16_t port, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr, SetScaleCallback sscb = nullptr );
-    View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, GetWindowCallback gwcb = nullptr, SetScaleCallback sscb = nullptr );
+    View( void(*cbMainThread)(std::function<void()>, bool), ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, SetScaleCallback sscb = nullptr ) : View( cbMainThread, "127.0.0.1", 8086, fixedWidth, smallFont, bigFont, stcb, sscb ) {}
+    View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, uint16_t port, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, SetScaleCallback sscb = nullptr );
+    View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, SetScaleCallback sscb = nullptr );
     ~View();
 
     static bool Draw();
@@ -131,19 +132,13 @@ public:
     void ShowSampleParents( uint64_t symAddr, bool withInlines ) { m_sampleParents.symAddr = symAddr; m_sampleParents.sel = 0; m_sampleParents.withInlines = withInlines; }
     const ViewData& GetViewData() const { return m_vd; }
 
+    ShortenName GetShortenName() const { return m_shortenName; }
 
     bool m_showRanges = false;
     Range m_statRange;
     Range m_waitStackRange;
 
 private:
-    enum class Namespace : uint8_t
-    {
-        Full,
-        Mid,
-        Short
-    };
-
     enum class ShortcutAction : uint8_t
     {
         None,
@@ -189,8 +184,6 @@ private:
 
     void InitMemory();
     void InitTextEditor( ImFont* font );
-
-    const char* ShortenNamespace( const char* name ) const;
 
     bool DrawImpl();
     void DrawNotificationArea();
@@ -416,6 +409,7 @@ private:
     uint64_t m_totalMemory;
 
     ViewData m_vd;
+    TimelineController m_tc;
 
     const ZoneEvent* m_zoneInfoWindow = nullptr;
     const ZoneEvent* m_zoneHighlight;
@@ -495,7 +489,7 @@ private:
     bool m_groupWaitStackTopDown = true;
 
     ShortcutAction m_shortcut = ShortcutAction::None;
-    Namespace m_namespace = Namespace::Short;
+    ShortenName m_shortenName = ShortenName::NoSpaceAndNormalize;
     Animation m_zoomAnim;
     BuzzAnim<int> m_callstackBuzzAnim;
     BuzzAnim<int> m_sampleParentBuzzAnim;
@@ -521,7 +515,6 @@ private:
     float m_rootWidth, m_rootHeight;
     SetTitleCallback m_stcb;
     bool m_titleSet = false;
-    GetWindowCallback m_gwcb;
     SetScaleCallback m_sscb;
 
     float m_notificationTime = 0;

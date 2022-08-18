@@ -64,6 +64,7 @@
 #include "../common/tracy_lz4.hpp"
 #include "tracy_rpmalloc.hpp"
 #include "TracyCallstack.hpp"
+#include "TracyDebug.hpp"
 #include "TracyDxt1.hpp"
 #include "TracyScoped.hpp"
 #include "TracyProfiler.hpp"
@@ -581,7 +582,7 @@ static const char* GetHostInfo()
 
 #if defined __i386 || defined _M_IX86 || defined __x86_64__ || defined _M_X64
     uint32_t regs[4];
-    char cpuModel[4*4*3];
+    char cpuModel[4*4*3+1] = {};
     auto modelPtr = cpuModel;
     for( uint32_t i=0x80000002; i<0x80000005; ++i )
     {
@@ -1355,6 +1356,7 @@ Profiler::Profiler()
     , m_deferredQueue( 64*1024 )
 #endif
     , m_paramCallback( nullptr )
+    , m_sourceCallback( nullptr )
     , m_queryImage( nullptr )
     , m_queryData( nullptr )
     , m_crashHandlerInstalled( false )
@@ -1444,7 +1446,7 @@ void Profiler::SpawnWorkerThreads()
 #endif
 
 #ifdef TRACY_HAS_CALLSTACK
-    InitCallstack();
+    InitCallstackCritical();
 #endif
 
     m_timeBegin.store( GetTime(), std::memory_order_relaxed );
@@ -3296,11 +3298,11 @@ void Profiler::SymbolWorker()
 {
     ThreadExitHandler threadExitHandler;
     SetThreadName( "Tracy Symbol Worker" );
-    while( m_timeBegin.load( std::memory_order_relaxed ) == 0 ) std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
-
 #ifdef TRACY_USE_RPMALLOC
     rpmalloc_thread_initialize();
 #endif
+    InitCallstack();
+    while( m_timeBegin.load( std::memory_order_relaxed ) == 0 ) std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
 
     for(;;)
     {
@@ -3854,6 +3856,7 @@ void Profiler::HandleSourceCodeQuery()
         if( buildid )
         {
             auto d = debuginfod_find_source( GetDebuginfodClient(), buildid, size, m_queryData, nullptr );
+            TracyDebug( "DebugInfo source query: %s, fn: %s, image: %s\n", d >= 0 ? " ok " : "fail", m_queryData, m_queryImage );
             if( d >= 0 )
             {
                 struct stat st;
@@ -3874,7 +3877,26 @@ void Profiler::HandleSourceCodeQuery()
             }
         }
     }
+    else
+    {
+        TracyDebug( "DebugInfo invalid query fn: %s, image: %s\n", m_queryData, m_queryImage );
+    }
 #endif
+
+    if( !ok && m_sourceCallback )
+    {
+        size_t sz;
+        char* ptr = m_sourceCallback( m_sourceCallbackData, m_queryData, sz );
+        if( ptr )
+        {
+            if( sz < ( TargetFrameSize - 16 ) )
+            {
+                SendLongString( (uint64_t)ptr, ptr, sz, QueueType::SourceCode );
+                ok = true;
+            }
+            tracy_free_fast( ptr );
+        }
+    }
 
     if( !ok ) AckSourceCodeNotAvailable();
 

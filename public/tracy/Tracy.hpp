@@ -98,6 +98,7 @@
 #define TracyMessageCS(x,y,z,w)
 #define TracyMessageLCS(x,y,z)
 
+#define TracySourceCallbackRegister(x,y)
 #define TracyParameterRegister(x)
 #define TracyParameterSetup(x,y,z,w)
 #define TracyIsConnected false
@@ -258,6 +259,7 @@
 #  define TracyMessageLCS( txt, color, depth ) TracyMessageLC( txt, color )
 #endif
 
+#define TracySourceCallbackRegister( cb, data ) tracy::Profiler::SourceCallbackRegister( cb, data )
 #define TracyParameterRegister( cb ) tracy::Profiler::ParameterRegister( cb )
 #define TracyParameterSetup( idx, name, isBool, val ) tracy::Profiler::ParameterSetup( idx, name, isBool, val )
 #define TracyIsConnected tracy::GetProfiler().IsConnected()

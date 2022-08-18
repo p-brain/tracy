@@ -826,36 +826,6 @@ const char* View::GetFrameSetName( const FrameData& fd, const Worker& worker )
     }
 }
 
-const char* View::ShortenNamespace( const char* name ) const
-{
-    if( m_namespace == Namespace::Full ) return name;
-    if( m_namespace == Namespace::Short )
-    {
-        auto ptr = name;
-        while( *ptr != '\0' ) ptr++;
-        while( ptr > name && *ptr != ':' ) ptr--;
-        if( *ptr == ':' ) ptr++;
-        return ptr;
-    }
-
-    static char buf[1024];
-    auto dst = buf;
-    auto ptr = name;
-    for(;;)
-    {
-        auto start = ptr;
-        while( *ptr != '\0' && *ptr != ':' ) ptr++;
-        if( *ptr == '\0' )
-        {
-            memcpy( dst, start, ptr - start + 1 );
-            return buf;
-        }
-        *dst++ = *start;
-        *dst++ = ':';
-        while( *ptr == ':' ) ptr++;
-    }
-}
-
 const char* View::GetThreadContextData( uint64_t thread, bool& _local, bool& _untracked, const char*& program )
 {
     static char buf[256];

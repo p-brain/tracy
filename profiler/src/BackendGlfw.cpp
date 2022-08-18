@@ -8,20 +8,6 @@
 #include <stdlib.h>
 #include <thread>
 
-#ifdef _WIN32
-#  define GLFW_EXPOSE_NATIVE_WIN32
-#  include <GLFW/glfw3native.h>
-#elif defined __linux__
-#  ifdef DISPLAY_SERVER_X11
-#    define GLFW_EXPOSE_NATIVE_X11
-#  elif defined DISPLAY_SERVER_WAYLAND
-#    define GLFW_EXPOSE_NATIVE_WAYLAND
-#  else
-#    error "unsupported linux display server"
-#  endif
-#  include <GLFW/glfw3native.h>
-#endif
-
 #include "Backend.hpp"
 #include "RunQueue.hpp"
 
@@ -38,7 +24,7 @@ static void glfw_error_callback( int error, const char* description )
 
 static void glfw_window_pos_callback( GLFWwindow* window, int x, int y )
 {
-    if( !glfwGetWindowAttrib( window, GLFW_MAXIMIZED) )
+    if( !glfwGetWindowAttrib( window, GLFW_MAXIMIZED ) )
     {
         s_winPos->x = x;
         s_winPos->y = y;
@@ -47,7 +33,7 @@ static void glfw_window_pos_callback( GLFWwindow* window, int x, int y )
 
 static void glfw_window_size_callback( GLFWwindow* window, int w, int h )
 {
-    if( !glfwGetWindowAttrib( window, GLFW_MAXIMIZED) )
+    if( !glfwGetWindowAttrib( window, GLFW_MAXIMIZED ) )
     {
         s_winPos->w = w;
         s_winPos->h = h;
@@ -194,19 +180,4 @@ float Backend::GetDpiScale()
     }
 #endif
     return 1;
-}
-
-void* Backend::GetNativeWindow()
-{
-#ifdef _WIN32
-    return (void*)glfwGetWin32Window( s_window );
-#elif defined __linux__
-#  ifdef DISPLAY_SERVER_X11
-    return (void*)glfwGetX11Window( s_window );
-#  elif defined DISPLAY_SERVER_WAYLAND
-    return (void*)glfwGetWaylandWindow( s_window );
-#  endif
-#else
-    return nullptr;
-#endif
 }

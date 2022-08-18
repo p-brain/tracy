@@ -351,6 +351,9 @@
     <ClCompile Include="..\..\src\ImGuiContext.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineController.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\GetMainWindowHandle.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -414,9 +417,6 @@
       <Filter>server</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\server\TracyBuzzAnim.hpp">
-      <Filter>server</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\server\IconsFontAwesome5.h">
       <Filter>server</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\server\TracyStorage.hpp">
@@ -719,9 +719,19 @@
     <ClInclude Include="..\..\src\ImGuiContext.hpp">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineController.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyUtility.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\IconsFontAwesome6.h">
+      <Filter>server</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\GetMainWindowHandle.h">
       <Filter>src</Filter>
     </ClInclude>
+
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />

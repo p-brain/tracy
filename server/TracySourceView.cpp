@@ -13,10 +13,11 @@
 #include "TracyPrint.hpp"
 #include "TracySort.hpp"
 #include "TracySourceView.hpp"
+#include "TracyUtility.hpp"
 #include "TracyView.hpp"
 #include "TracyWorker.hpp"
 
-#include "IconsFontAwesome5.h"
+#include "IconsFontAwesome6.h"
 
 #ifndef TRACY_NO_FILESELECTOR
 #  include "../nfd/nfd.h"
@@ -219,10 +220,10 @@ static void PrintSourceFragment( const SourceContents& src, uint32_t srcline, in
 }
 
 
-enum { JumpSeparationBase = 6 };
-enum { JumpArrowBase = 9 };
+constexpr float JumpSeparationBase = 6;
+constexpr float JumpArrowBase = 9;
 
-SourceView::SourceView( GetWindowCallback gwcb )
+SourceView::SourceView()
     : m_font( nullptr )
     , m_smallFont( nullptr )
     , m_symAddr( 0 )
@@ -248,7 +249,6 @@ SourceView::SourceView( GetWindowCallback gwcb )
     , m_showJumps( true )
     , m_cpuArch( CpuArchUnknown )
     , m_showLatency( false )
-    , m_gwcb( gwcb )
 {
     m_microArchOpMap.reserve( OpsNum );
     for( int i=0; i<OpsNum; i++ )
@@ -1010,7 +1010,12 @@ void SourceView::Render( Worker& worker, View& view )
 
     if( m_symAddr == 0 )
     {
-        if( m_source.filename() ) TextFocused( ICON_FA_FILE " File:", m_source.filename() );
+        if( m_source.filename() )
+        {
+            ImGui::PushFont( m_bigFont );
+            TextFocused( ICON_FA_FILE " File:", m_source.filename() );
+            ImGui::PopFont();
+        }
         if( m_source.is_cached() )
         {
             TextColoredUnformatted( ImVec4( 0.4f, 0.8f, 0.4f, 1.f ), ICON_FA_DATABASE );
@@ -1019,11 +1024,11 @@ void SourceView::Render( Worker& worker, View& view )
         }
         else
         {
-            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
             ImGui::SameLine();
             TextColoredUnformatted( ImVec4( 1.f, 0.3f, 0.3f, 1.f ), "The source file contents might not reflect the actual profiled code!" );
             ImGui::SameLine();
-            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
         }
 
         RenderSimpleSourceView();
@@ -1090,14 +1095,28 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
 {
     assert( m_symAddr != 0 );
 
+    const auto shortenName = view.GetShortenName();
     auto sym = worker.GetSymbolData( m_symAddr );
     assert( sym );
+    ImGui::PushFont( m_bigFont );
     if( sym->isInline )
     {
         auto parent = worker.GetSymbolData( m_baseAddr );
         if( parent )
         {
-            TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", worker.GetString( parent->name ) );
+            const auto symName = worker.GetString( parent->name );
+            if( shortenName == ShortenName::Never )
+            {
+                TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", symName );
+            }
+            else
+            {
+                const auto normalized = ShortenZoneName( ShortenName::OnlyNormalize, symName );
+                TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", normalized );
+                ImGui::PopFont();
+                TooltipNormalizedName( symName, normalized );
+                ImGui::PushFont( m_bigFont );
+            }
         }
         else
         {
@@ -1108,12 +1127,25 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
     }
     else
     {
-        TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", worker.GetString( sym->name ) );
+        const auto symName = worker.GetString( sym->name );
+        if( shortenName == ShortenName::Never )
+        {
+            TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", symName );
+        }
+        else
+        {
+            const auto normalized = ShortenZoneName( ShortenName::OnlyNormalize, symName );
+            TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", normalized );
+            ImGui::PopFont();
+            TooltipNormalizedName( symName, normalized );
+            ImGui::PushFont( m_bigFont );
+        }
     }
     ImGui::SameLine();
     TextDisabledUnformatted( worker.GetString( sym->imageName ) );
     ImGui::SameLine();
     ImGui::TextDisabled( "0x%" PRIx64, m_baseAddr );
+    ImGui::PopFont();
 
     const bool limitView = view.m_statRange.active;
     auto inlineList = worker.GetInlineSymbolList( m_baseAddr, m_codeLen );
@@ -1122,7 +1154,8 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         if( m_calcInlineStats )
         {
             ImGui::SameLine();
-            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+            ImGui::AlignTextToFramePadding();
+            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
             TooltipIfHovered( "Context is limited to an inline function" );
         }
         if( SmallCheckbox( ICON_FA_SITEMAP " Function:", &m_calcInlineStats ) )
@@ -1133,7 +1166,8 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         ImGui::SameLine();
         ImGui::SetNextItemWidth( -1 );
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
-        const auto currSymName = m_symAddr == m_baseAddr ? "[ - self - ]" : worker.GetString( sym->name );
+        auto currSymName = m_symAddr == m_baseAddr ? "[ - self - ]" : worker.GetString( sym->name );
+        if( shortenName != ShortenName::Never ) currSymName = ShortenZoneName( ShortenName::OnlyNormalize, currSymName );
         if( ImGui::BeginCombo( "##functionList", currSymName, ImGuiComboFlags_HeightLarge ) )
         {
             const auto symEnd = m_baseAddr + m_codeLen;
@@ -1247,7 +1281,12 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                 }
                 ImGui::PushID( v.first );
                 const auto symName = v.first == m_baseAddr ? "[ - self - ]" : worker.GetString( isym->name );
-                if( ImGui::Selectable( symName, v.first == m_symAddr, ImGuiSelectableFlags_SpanAllColumns ) )
+                const auto normalized = shortenName != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, symName ) : symName;
+                const auto selected = ImGui::Selectable( "", v.first == m_symAddr, ImGuiSelectableFlags_SpanAllColumns );
+                ImGui::SameLine( 0, 0 );
+                ImGui::TextUnformatted( normalized );
+                TooltipNormalizedName( symName, normalized );
+                if( selected )
                 {
                     m_symAddr = v.first;
                     ParseSource( file, worker, view );
@@ -1260,6 +1299,18 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                 ImGui::Spacing();
                 ImGui::SameLine();
                 ImGui::TextDisabled( "%s:%i", file, line );
+                if( ImGui::IsItemHovered() && SourceFileValid( file, worker.GetCaptureTime(), view, worker ) )
+                {
+                    m_sourceTooltip.Parse( file, worker, view );
+                    if( !m_sourceTooltip.empty() )
+                    {
+                        ImGui::BeginTooltip();
+                        SetFont();
+                        PrintSourceFragment( m_sourceTooltip, line, 4, 7 );
+                        UnsetFont();
+                        ImGui::EndTooltip();
+                    }
+                }
                 ImGui::NextColumn();
                 ImGui::TextDisabled( "0x%" PRIx64, v.first );
                 ImGui::NextColumn();
@@ -1343,7 +1394,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         {
             SmallCheckbox( ICON_FA_HAMMER " Hw samples", &m_hwSamples );
             ImGui::SameLine();
-            SmallCheckbox( ICON_FA_CAR_CRASH " Impact", &m_hwSamplesRelative );
+            SmallCheckbox( ICON_FA_CAR_BURST " Impact", &m_hwSamplesRelative );
             ImGui::SameLine();
             ImGui::Spacing();
             ImGui::SameLine();
@@ -1394,7 +1445,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
             {
                 m_childCalls = !m_childCalls;
             }
-            SmallCheckbox( ICON_FA_SIGN_OUT_ALT " Child calls", &m_childCalls );
+            SmallCheckbox( ICON_FA_RIGHT_FROM_BRACKET " Child calls", &m_childCalls );
             if( !samplesReady )
             {
                 ImGui::PopStyleVar();
@@ -1475,7 +1526,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
             if( view.m_statRange.active )
             {
                 ImGui::SameLine();
-                TextColoredUnformatted( 0xFF00FFFF, ICON_FA_EXCLAMATION_TRIANGLE );
+                TextColoredUnformatted( 0xFF00FFFF, ICON_FA_TRIANGLE_EXCLAMATION );
                 ImGui::SameLine();
                 ToggleButton( ICON_FA_RULER " Limits", view.m_showRanges );
             }
@@ -1518,7 +1569,16 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                     const auto symName = sd ? worker.GetString( sd->name ) : "[unknown]";
                     if( v.addr >> 63 == 0 )
                     {
-                        ImGui::TextUnformatted( symName );
+                        if( shortenName == ShortenName::Never )
+                        {
+                            ImGui::TextUnformatted( symName );
+                        }
+                        else
+                        {
+                            const auto normalized = ShortenZoneName( ShortenName::OnlyNormalize, symName );
+                            ImGui::TextUnformatted( normalized );
+                            TooltipNormalizedName( symName, normalized );
+                        }
                     }
                     else
                     {
@@ -1710,11 +1770,11 @@ void SourceView::RenderSymbolSourceView( const AddrStatData& as, Worker& worker,
         }
         else
         {
-            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
             ImGui::SameLine();
             TextColoredUnformatted( ImVec4( 1.f, 0.3f, 0.3f, 1.f ), "The source file contents might not reflect the actual profiled code!" );
             ImGui::SameLine();
-            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
         }
     }
     else
@@ -1726,15 +1786,15 @@ void SourceView::RenderSymbolSourceView( const AddrStatData& as, Worker& worker,
         }
         else
         {
-            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+            TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
             if( ImGui::IsItemHovered() )
             {
                 ImGui::BeginTooltip();
-                TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+                TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
                 ImGui::SameLine();
                 TextColoredUnformatted( ImVec4( 1.f, 0.3f, 0.3f, 1.f ), "The source file contents might not reflect the actual profiled code!" );
                 ImGui::SameLine();
-                TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+                TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
                 ImGui::EndTooltip();
             }
         }
@@ -2072,7 +2132,7 @@ void SourceView::RenderSymbolSourceView( const AddrStatData& as, Worker& worker,
         }
 
         ImGui::BeginChild( "##srcSelect" );
-        if( ImGui::SmallButton( ICON_FA_TIMES ) )
+        if( ImGui::SmallButton( ICON_FA_XMARK ) )
         {
             m_srcSampleSelect.clear();
             m_srcGroupSelect = -1;
@@ -2201,7 +2261,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
     const auto scale = GetScale();
     if( m_disasmFail >= 0 )
     {
-        TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_EXCLAMATION_TRIANGLE );
+        TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
         if( ImGui::IsItemHovered() )
         {
             const bool clicked = ImGui::IsItemClicked();
@@ -2224,7 +2284,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
         }
         ImGui::SameLine();
     }
-    SmallCheckbox( ICON_FA_SEARCH_LOCATION " Relative loc.", &m_asmRelative );
+    SmallCheckbox( ICON_FA_MAGNIFYING_GLASS_LOCATION " Relative loc.", &m_asmRelative );
     if( !m_sourceFiles.empty() )
     {
         ImGui::SameLine();
@@ -2235,7 +2295,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
     ImGui::SameLine();
     ImGui::Spacing();
     ImGui::SameLine();
-    SmallCheckbox( ICON_FA_COGS " Machine code", &m_asmBytes );
+    SmallCheckbox( ICON_FA_GEARS " Machine code", &m_asmBytes );
     ImGui::SameLine();
     ImGui::Spacing();
     ImGui::SameLine();
@@ -2304,7 +2364,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
             ImGui::SameLine();
             ImGui::Spacing();
             ImGui::SameLine();
-            SmallCheckbox( ICON_FA_TRUCK_LOADING " Latency", &m_showLatency );
+            SmallCheckbox( ICON_FA_TRUCK_RAMP_BOX " Latency", &m_showLatency );
         }
     }
 
@@ -2411,10 +2471,11 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                     const auto y0 = ( it0 == insList.end() || *it0 != v.second.min ) ? -th : ( it0 - insList.begin() ) * th;
                     const auto y1 = it1 == insList.end() ? ( insList.size() + 1 ) * th  : ( it1 - insList.begin() ) * th;
 
-                    float thickness = 1;
+                    float thickness = m_highlightAddr == v.first ? 2 : 1;
                     if( ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( wpos + ImVec2( xoff + JumpSeparation * ( mjl - v.second.level ) - JumpSeparation / 2, y0 + th2 ), wpos + ImVec2( xoff + JumpSeparation * ( mjl - v.second.level ) + JumpSeparation / 2, y1 + th2 ) ) )
                     {
                         thickness = 2;
+                        const auto shortenName = view.GetShortenName();
                         UnsetFont();
                         ImGui::BeginTooltip();
                         char tmp[32];
@@ -2446,7 +2507,9 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                                     ImGui::SameLine();
                                     ImGui::PushFont( m_smallFont );
                                     ImGui::AlignTextToFramePadding();
-                                    TextDisabledUnformatted( worker.GetString( symData->name ) );
+                                    const auto symName = worker.GetString( symData->name );
+                                    const auto normalized = shortenName != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, symName ) : symName;
+                                    TextDisabledUnformatted( normalized );
                                     ImGui::PopFont();
                                 }
                             }
@@ -2481,7 +2544,9 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                                         ImGui::SameLine();
                                         ImGui::PushFont( m_smallFont );
                                         ImGui::AlignTextToFramePadding();
-                                        TextDisabledUnformatted( worker.GetString( symData->name ) );
+                                        const auto symName = worker.GetString( symData->name );
+                                        const auto normalized = shortenName != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, symName ) : symName;
+                                        TextDisabledUnformatted( normalized );
                                         ImGui::PopFont();
                                     }
                                 }
@@ -2579,7 +2644,14 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                     {
                         SmallColorBox( 0 );
                         ImGui::SameLine();
-                        ImGui::TextDisabled( "0x%" PRIx64, src );
+                        char buf[32];
+                        sprintf( buf, "0x%" PRIx64, src );
+                        if( ImGui::MenuItem( buf ) )
+                        {
+                            m_targetAddr = src;
+                            m_selectedAddresses.clear();
+                            m_selectedAddresses.emplace( src );
+                        }
                     }
                     else
                     {
@@ -2623,37 +2695,53 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
             {
                 uint32_t srcline;
                 const auto srcidx = worker.GetLocationForAddress( m_jumpPopupAddr, srcline );
-                if( srcline != 0 )
+                const auto fileName = srcline != 0 ? worker.GetString( srcidx ) : nullptr;
+                const auto fileColor = srcline != 0 ? GetHsvColor( srcidx.Idx(), 0 ) : 0;
+                SmallColorBox( fileColor );
+                ImGui::SameLine();
+                char buf[1024];
+                if( fileName )
                 {
-                    const auto fileName = worker.GetString( srcidx );
-                    const auto fileColor = GetHsvColor( srcidx.Idx(), 0 );
-                    SmallColorBox( fileColor );
-                    ImGui::SameLine();
-                    char buf[1024];
                     snprintf( buf, 1024, "%s:%i", fileName, srcline );
-                    if( ImGui::BeginMenu( buf ) )
+                }
+                else
+                {
+                    uint32_t jumpOffset = 0;
+                    uint64_t jumpBase = worker.GetSymbolForAddress( m_jumpPopupAddr, jumpOffset );
+                    auto jumpSym = jumpBase == 0 ? worker.GetSymbolData( m_jumpPopupAddr ) : worker.GetSymbolData( jumpBase );
+                    if( jumpSym )
                     {
-                        if( SourceFileValid( fileName, worker.GetCaptureTime(), view, worker ) )
+                        const auto jumpName = worker.GetString( jumpSym->name );
+                        const auto normalized = view.GetShortenName() != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, jumpName ) : jumpName;
+                        snprintf( buf, 1024, "%s+%" PRIu32, normalized, jumpOffset );
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled( "0x%" PRIx64, m_jumpPopupAddr );
+                    }
+                }
+                if( ImGui::BeginMenu( buf ) )
+                {
+                    if( fileName && SourceFileValid( fileName, worker.GetCaptureTime(), view, worker ) )
+                    {
+                        m_sourceTooltip.Parse( fileName, worker, view );
+                        if( !m_sourceTooltip.empty() )
                         {
-                            m_sourceTooltip.Parse( fileName, worker, view );
-                            if( !m_sourceTooltip.empty() )
-                            {
-                                SetFont();
-                                PrintSourceFragment( m_sourceTooltip, srcline );
-                                UnsetFont();
-                            }
+                            SetFont();
+                            PrintSourceFragment( m_sourceTooltip, srcline );
+                            UnsetFont();
                         }
-                        else
-                        {
-                            TextDisabledUnformatted( "Source not available" );
-                        }
-                        ImGui::EndMenu();
-                        if( ImGui::IsItemClicked() )
-                        {
-                            m_targetAddr = m_jumpPopupAddr;
-                            m_selectedAddresses.clear();
-                            m_selectedAddresses.emplace( m_jumpPopupAddr );
-                        }
+                    }
+                    else
+                    {
+                        TextDisabledUnformatted( "Source not available" );
+                    }
+                    ImGui::EndMenu();
+                    if( ImGui::IsItemClicked() )
+                    {
+                        m_targetAddr = m_jumpPopupAddr;
+                        m_selectedAddresses.clear();
+                        m_selectedAddresses.emplace( m_jumpPopupAddr );
                     }
                 }
                 ImGui::EndMenu();
@@ -2833,7 +2921,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
         }
 
         ImGui::BeginChild( "##asmSelect" );
-        if( ImGui::SmallButton( ICON_FA_TIMES ) )
+        if( ImGui::SmallButton( ICON_FA_XMARK ) )
         {
             m_asmSampleSelect.clear();
             m_asmGroupSelect = -1;
@@ -3562,9 +3650,17 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                         const auto symData = worker.GetSymbolData( symAddr );
                         if( symData )
                         {
-                            TextFocused( "Function:", worker.GetString( symData->name ) );
+                            const auto symName = worker.GetString( symData->name );
+                            const auto normalized = view.GetShortenName() != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, symName ) : symName;
+                            TextFocused( "Function:", normalized );
                             ImGui::SameLine();
                             ImGui::TextDisabled( "(0x%" PRIx64 ")", symAddr );
+                            if( normalized != symName && strcmp( normalized, symName ) != 0 )
+                            {
+                                ImGui::PushFont( m_smallFont );
+                                TextDisabledUnformatted( symName );
+                                ImGui::PopFont();
+                            }
                         }
                     }
                 }
@@ -3618,6 +3714,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
             ImGui::SameLine();
             startPos = ImGui::GetCursorScreenPos();
             TextDisabledUnformatted( "[unknown]" );
+            if( ImGui::IsItemHovered() ) lineHovered = true;
         }
         ImGui::SameLine( 0, 0 );
         const auto endPos = ImGui::GetCursorScreenPos();
@@ -4142,14 +4239,18 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
 
     if( jumpName )
     {
+        const auto normalized = view.GetShortenName() != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, jumpName ) : jumpName;
         ImGui::SameLine();
         ImGui::Spacing();
         ImGui::SameLine();
         if( jumpBase == m_baseAddr )
         {
-            ImGui::TextDisabled( "  -> [%s+%" PRIu32"]", jumpName, jumpOffset );
+            ImGui::TextDisabled( "  -> [%s+%" PRIu32"]", normalized, jumpOffset );
             if( ImGui::IsItemHovered() )
             {
+                UnsetFont();
+                TooltipNormalizedName( jumpName, normalized );
+                SetFont();
                 m_highlightAddr = line.jumpAddr;
                 if( ImGui::IsItemClicked() )
                 {
@@ -4161,8 +4262,14 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         }
         else
         {
-            ImGui::TextDisabled( "  [%s+%" PRIu32"]", jumpName, jumpOffset );
-            if( ImGui::IsItemClicked() ) jumpOut = line.jumpAddr;
+            ImGui::TextDisabled( "  [%s+%" PRIu32"]", normalized, jumpOffset );
+            if( ImGui::IsItemHovered() )
+            {
+                UnsetFont();
+                TooltipNormalizedName( jumpName, normalized );
+                SetFont();
+                if( ImGui::IsItemClicked() ) jumpOut = line.jumpAddr;
+            }
         }
     }
 
@@ -4227,19 +4334,17 @@ void SourceView::RenderHwLinePart( size_t cycles, size_t retired, size_t branchR
             else
             {
                 char buf[16];
-                if( rate >= 0.1f )
+                const auto end = PrintFloat( buf, buf+16, rate * 100, 1 );
+                memcpy( end, "% ", 3 );
+                if( end - buf == 4 )
                 {
-                    const auto end = PrintFloat( buf, buf+16, rate * 100, 1 );
-                    assert( end == buf+4 );
+                    TextColoredUnformatted( col, buf );
                 }
                 else
                 {
-                    *buf = ' ';
-                    const auto end = PrintFloat( buf+1, buf+16, rate * 100, 1 );
-                    assert( end == buf+4 );
+                    ImGui::SameLine( 0, ts.x );
+                    TextColoredUnformatted( col, buf );
                 }
-                memcpy( buf+4, "% ", 3 );
-                TextColoredUnformatted( col, buf );
             }
             if( ImGui::IsItemHovered() )
             {
@@ -4320,19 +4425,17 @@ void SourceView::RenderHwLinePart( size_t cycles, size_t retired, size_t branchR
             else
             {
                 char buf[16];
-                if( rate >= 0.1f )
+                const auto end = PrintFloat( buf, buf+16, rate * 100, 1 );
+                memcpy( end, "% ", 3 );
+                if( end - buf == 4 )
                 {
-                    const auto end = PrintFloat( buf, buf+16, rate * 100, 1 );
-                    assert( end == buf+4 );
+                    TextColoredUnformatted( col, buf );
                 }
                 else
                 {
-                    *buf = ' ';
-                    const auto end = PrintFloat( buf+1, buf+16, rate * 100, 1 );
-                    assert( end == buf+4 );
+                    ImGui::SameLine( 0, ts.x );
+                    TextColoredUnformatted( col, buf );
                 }
-                memcpy( buf+4, "% ", 3 );
-                TextColoredUnformatted( col, buf );
             }
             if( ImGui::IsItemHovered() )
             {
@@ -4370,19 +4473,17 @@ void SourceView::RenderHwLinePart( size_t cycles, size_t retired, size_t branchR
             else
             {
                 char buf[16];
-                if( rate >= 0.1f )
+                const auto end = PrintFloat( buf, buf+16, rate * 100, 1 );
+                memcpy( end, "%", 2 );
+                if( end - buf == 4 )
                 {
-                    const auto end = PrintFloat( buf, buf+16, rate * 100, 1 );
-                    assert( end == buf+4 );
+                    TextColoredUnformatted( col, buf );
                 }
                 else
                 {
-                    *buf = ' ';
-                    const auto end = PrintFloat( buf+1, buf+16, rate * 100, 1 );
-                    assert( end == buf+4 );
+                    ImGui::SameLine( 0, ts.x );
+                    TextColoredUnformatted( col, buf );
                 }
-                memcpy( buf+4, "%", 2 );
-                TextColoredUnformatted( col, buf );
             }
             if( ImGui::IsItemHovered() )
             {

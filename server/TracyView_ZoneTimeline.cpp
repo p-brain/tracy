@@ -9,7 +9,7 @@
 namespace tracy
 {
 
-enum { MinVisSize = 3 };
+constexpr float MinVisSize = 3;
 
 static tracy_force_inline uint32_t MixGhostColor( uint32_t c0, uint32_t c1 )
 {
@@ -60,7 +60,7 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
     {
         auto& ev = *it;
         const auto end = ev.end.Val();
-        const auto zsz = std::max( ( end - ev.start.Val() ) * pxns, pxns * 0.5 );
+        const auto zsz = std::max( ( std::min( m_vd.zvEnd, end ) - std::max( m_vd.zvStart, ev.start.Val() ) ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
             const auto MinVisNs = MinVisSize * nspx;
@@ -217,10 +217,9 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
                 DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px1-1, offset + tsz.y ), dpos + ImVec2( px1-1, offset ), darkColor, 1.f );
 
                 auto origSymName = symName;
-                if( tsz.x > zsz )
+                if( m_shortenName != ShortenName::Never && ( m_shortenName != ShortenName::NoSpace || tsz.x > zsz ) )
                 {
-                    symName = ShortenNamespace( symName );
-                    tsz = ImGui::CalcTextSize( symName );
+                    symName = ShortenZoneName( m_shortenName, symName, tsz, zsz );
                 }
 
                 if( tsz.x < zsz )
@@ -244,7 +243,7 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
                 else
                 {
                     ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                    DrawTextContrast( draw, wpos + ImVec2( ( ev.start.Val() - m_vd.zvStart ) * pxns, offset ), txtColor, symName );
+                    DrawTextContrast( draw, wpos + ImVec2( std::max( int64_t( 0 ), ev.start.Val() - m_vd.zvStart ) * pxns, offset ), txtColor, symName );
                     ImGui::PopClipRect();
                 }
 
@@ -259,11 +258,18 @@ int View::DrawGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
                         TextDisabledUnformatted( ICON_FA_HAT_WIZARD " kernel" );
                     }
                     ImGui::Separator();
-                    ImGui::TextUnformatted( origSymName );
+                    const auto normalized = m_shortenName == ShortenName::Never ? origSymName : ShortenZoneName( ShortenName::OnlyNormalize, origSymName );
+                    ImGui::TextUnformatted( normalized );
                     if( isInline )
                     {
                         ImGui::SameLine();
                         TextDisabledUnformatted( "[inline]" );
+                    }
+                    if( normalized != origSymName && strcmp( normalized, origSymName ) != 0 )
+                    {
+                        ImGui::PushFont( m_smallFont );
+                        TextDisabledUnformatted( origSymName );
+                        ImGui::PopFont();
                     }
                     const auto symbol = m_worker.GetSymbolData( sym.symAddr );
                     if( symbol ) TextFocused( "Image:", m_worker.GetString( symbol->imageName ) );
@@ -324,7 +330,7 @@ int View::SkipGhostLevel( const Vector<GhostZone>& vec, bool hover, double pxns,
     {
         auto& ev = *it;
         const auto end = ev.end.Val();
-        const auto zsz = std::max( ( end - ev.start.Val() ) * pxns, pxns * 0.5 );
+        const auto zsz = std::max( ( std::min( m_vd.zvEnd, end ) - std::max( m_vd.zvStart, ev.start.Val() ) ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
             const auto MinVisNs = MinVisSize * nspx;
@@ -423,7 +429,7 @@ int View::DrawZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
     {
         auto& ev = a(*it);
         const auto end = m_worker.GetZoneEnd( ev );
-        const auto zsz = std::max( ( end - ev.Start() ) * pxns, pxns * 0.5 );
+        const auto zsz = std::max( ( std::min( m_vd.zvEnd, end ) - std::max( m_vd.zvStart, ev.Start() ) ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
             const auto MinVisNs = MinVisSize * nspx;
@@ -511,10 +517,9 @@ int View::DrawZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
             }
 
             auto tsz = ImGui::CalcTextSize( zoneName );
-            if( tsz.x > zsz )
+            if( m_shortenName == ShortenName::Always || ( ( m_shortenName == ShortenName::NoSpace || m_shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) )
             {
-                zoneName = ShortenNamespace( zoneName );
-                tsz = ImGui::CalcTextSize( zoneName );
+                zoneName = ShortenZoneName( m_shortenName, zoneName, tsz, zsz );
             }
 
             const auto pr0 = ( ev.Start() - m_vd.zvStart ) * pxns;
@@ -590,7 +595,7 @@ int View::DrawZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
             else
             {
                 ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                DrawTextContrast( draw, wpos + ImVec2( ( ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
+                DrawTextContrast( draw, wpos + ImVec2( std::max( int64_t( 0 ), ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
                 ImGui::PopClipRect();
             }
 
@@ -646,7 +651,7 @@ int View::SkipZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
     {
         auto& ev = a(*it);
         const auto end = m_worker.GetZoneEnd( ev );
-        const auto zsz = std::max( ( end - ev.Start() ) * pxns, pxns * 0.5 );
+        const auto zsz = std::max( ( std::min( m_vd.zvEnd, end ) - std::max( m_vd.zvStart, ev.Start() ) ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
             const auto MinVisNs = MinVisSize * nspx;
