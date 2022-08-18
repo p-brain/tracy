@@ -772,7 +772,7 @@ static void DrawContents()
 
 
                     std::string cmd;
-                    `cmd += "powershell showprocess.ps1 " + v.second.procName;
+                    cmd += "powershell showprocess.ps1 " + v.second.procName;
                     cmd = std::regex_replace( cmd, std::regex( "\.exe" ), "" );
                     system(cmd.c_str());
 
