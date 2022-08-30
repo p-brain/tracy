@@ -2,7 +2,6 @@
 // Find the Main HWND for a PID
 
 //==================================================================================================
-#include <windows.h>
 #include "GetMainWindowHandle.h"
 
 struct handle_data

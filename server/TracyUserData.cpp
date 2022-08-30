@@ -3,7 +3,6 @@
 
 #ifdef _WIN32
 #  include <stdio.h>
-#  include <corecrt.h>
 #else
 #  include <unistd.h>
 #endif
@@ -285,7 +284,6 @@ bool UserData::LoadSourceSubstitutions( std::vector<SourceRegex>& data )
                 }
                 catch( std::regex_error& )
                 {
-                    _CRT_UNUSED( err );
                     regexValid = false;
                 }
                 data.emplace_back( SourceRegex { std::move( pattern ), std::move( target ), std::move( regex ) } );
