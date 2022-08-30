@@ -768,7 +768,7 @@ static void DrawContents()
 
                     std::string cmd;
                     cmd += "powershell showprocess.ps1 " + v.second.procName;
-                    cmd = std::regex_replace( cmd, std::regex( "\.exe" ), "" );
+                    cmd =   std::regex_replace( cmd, std::regex( "\.exe" ), "" );
                     system(cmd.c_str());
 
                     view = std::make_unique<tracy::View>( RunOnMainThread, v.second.address.c_str(), v.second.port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
