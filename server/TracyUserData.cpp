@@ -3,6 +3,7 @@
 
 #ifdef _WIN32
 #  include <stdio.h>
+#  include <corecrt.h>
 #else
 #  include <unistd.h>
 #endif
