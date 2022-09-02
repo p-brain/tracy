@@ -7,6 +7,7 @@
     "dependencies": [
         { "name": "capstone", "features":[ "arm", "arm64", "x86" ] },
         "freetype",
-        "glfw3"
+        "glfw3",
+        "rapidjson"
     ]
 }
