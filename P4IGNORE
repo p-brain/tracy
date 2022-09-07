@@ -1,0 +1,8 @@
+P4IGNORE
+.p4ignore
+.vs/
+win32/x64/
+.git/
+.github/
+.vscode
+
