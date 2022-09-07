@@ -354,6 +354,27 @@
     <ClCompile Include="..\..\..\server\TracyTimelineController.cpp">
       <Filter>server</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyUtility.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineItemPlot.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineItem.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineItemThread.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineItemGpu.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyView_GpuTimeline.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineItemCpuData.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\GetMainWindowHandle.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -402,9 +423,6 @@
       <Filter>server</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\server\TracyVarArray.hpp">
-      <Filter>server</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\server\TracyVersion.hpp">
       <Filter>server</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\server\TracyStringDiscovery.hpp">
@@ -726,6 +744,24 @@
       <Filter>server</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\server\IconsFontAwesome6.h">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\public\common\TracyVersion.hpp">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineItem.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineItemPlot.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineItemThread.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineItemGpu.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineItemCpuData.hpp">
       <Filter>server</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\GetMainWindowHandle.h">

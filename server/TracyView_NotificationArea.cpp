@@ -189,14 +189,26 @@ void View::DrawNotificationArea()
     }
     {
         bool hidden = false;
-        for( auto& v : m_visData )
+        for( auto& v : m_visMap )
         {
-            if( !v.second.visible )
+            if( !v.second )
             {
                 hidden = true;
                 break;
             }
         }
+        if( !hidden )
+        {
+            for( auto& v : m_tc.GetItemMap() )
+            {
+                if( !v.second->IsVisible() )
+                {
+                    hidden = true;
+                    break;
+                }
+            }
+        }
+
         if( hidden )
         {
             ImGui::SameLine();

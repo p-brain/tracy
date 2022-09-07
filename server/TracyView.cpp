@@ -52,6 +52,7 @@ View::View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, 
     , m_viewMode( ViewMode::LastFrames )
     , m_viewModeHeuristicTry( true )
     , m_forceConnectionPopup( true, true )
+    , m_tc( *this, m_worker )
     , m_frames( nullptr )
     , m_messagesScrollBottom( true )
     , m_reactToCrash( true )
@@ -76,6 +77,7 @@ View::View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFon
     , m_filename( f.GetFilename() )
     , m_staticView( true )
     , m_viewMode( ViewMode::Paused )
+    , m_tc( *this, m_worker )
     , m_frames( m_worker.GetFramesBase() )
     , m_messagesScrollBottom( false )
     , m_smallFont( smallFont )
@@ -834,55 +836,58 @@ bool View::DrawImpl()
             ImGui::EndPopup();
         }
     }
-    ImGui::SameLine();
-    if( ImGui::SmallButton( " " ICON_FA_CARET_LEFT " " ) ) ZoomToPrevFrame();
-    ImGui::SameLine();
+    if( m_worker.AreFramesUsed() )
     {
-        const auto vis = Vis( m_frames ).visible;
-        if( !vis )
+        ImGui::SameLine();
+        if( ImGui::SmallButton( " " ICON_FA_CARET_LEFT " " ) ) ZoomToPrevFrame();
+        ImGui::SameLine();
         {
-            ImGui::PushStyleColor( ImGuiCol_Text, GImGui->Style.Colors[ImGuiCol_TextDisabled] );
-        }
-        ImGui::Text( "%s: %s", GetFrameSetName( *m_frames ), RealToString( m_worker.GetFrameCount( *m_frames ) ) );
-        if( !vis )
-        {
-            ImGui::PopStyleColor();
-        }
-        if( ImGui::IsItemClicked() ) ImGui::OpenPopup( "GoToFramePopup" );
-    }
-    ImGui::SameLine();
-    if( ImGui::SmallButton( " " ICON_FA_CARET_RIGHT " " ) ) ZoomToNextFrame();
-    ImGui::SameLine();
-    if( ImGui::BeginCombo( "##frameCombo", nullptr, ImGuiComboFlags_NoPreview ) )
-    {
-        auto& frames = m_worker.GetFrames();
-        for( auto& fd : frames )
-        {
-            bool isSelected = m_frames == fd;
-            if( ImGui::Selectable( GetFrameSetName( *fd ), isSelected ) )
+            const auto vis = Vis( m_frames );
+            if( !vis )
             {
-                m_frames = fd;
+                ImGui::PushStyleColor( ImGuiCol_Text, GImGui->Style.Colors[ImGuiCol_TextDisabled] );
             }
-            if( isSelected )
+            ImGui::Text( "%s: %s", GetFrameSetName( *m_frames ), RealToString( m_worker.GetFrameCount( *m_frames ) ) );
+            if( !vis )
             {
-                ImGui::SetItemDefaultFocus();
+                ImGui::PopStyleColor();
             }
-            ImGui::SameLine();
-            ImGui::TextDisabled( "(%s)", RealToString( fd->frames.size() ) );
+            if( ImGui::IsItemClicked() ) ImGui::OpenPopup( "GoToFramePopup" );
         }
-        ImGui::EndCombo();
-    }
-    if( ImGui::BeginPopup( "GoToFramePopup" ) )
-    {
-        static int frameNum = 1;
-        const bool mainFrameSet = m_frames->name == 0;
-        const auto numFrames = mainFrameSet ? m_frames->frames.size() - 1 : m_frames->frames.size();
-        const auto frameOffset = mainFrameSet ? 0 : 1;
-        ImGui::SetNextItemWidth( 120 * GetScale() );
-        const bool clicked = ImGui::InputInt( "##goToFrame", &frameNum, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue );
-        frameNum = std::min( std::max( frameNum, 1 ), int( numFrames ) );
-        if( clicked ) ZoomToRange( m_worker.GetFrameBegin( *m_frames, frameNum - frameOffset ), m_worker.GetFrameEnd( *m_frames, frameNum - frameOffset ) );
-        ImGui::EndPopup();
+        ImGui::SameLine();
+        if( ImGui::SmallButton( " " ICON_FA_CARET_RIGHT " " ) ) ZoomToNextFrame();
+        ImGui::SameLine();
+        if( ImGui::BeginCombo( "##frameCombo", nullptr, ImGuiComboFlags_NoPreview ) )
+        {
+            auto& frames = m_worker.GetFrames();
+            for( auto& fd : frames )
+            {
+                bool isSelected = m_frames == fd;
+                if( ImGui::Selectable( GetFrameSetName( *fd ), isSelected ) )
+                {
+                    m_frames = fd;
+                }
+                if( isSelected )
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled( "(%s)", RealToString( fd->frames.size() ) );
+            }
+            ImGui::EndCombo();
+        }
+        if( ImGui::BeginPopup( "GoToFramePopup" ) )
+        {
+            static int frameNum = 1;
+            const bool mainFrameSet = m_frames->name == 0;
+            const auto numFrames = mainFrameSet ? m_frames->frames.size() - 1 : m_frames->frames.size();
+            const auto frameOffset = mainFrameSet ? 0 : 1;
+            ImGui::SetNextItemWidth( 120 * GetScale() );
+            const bool clicked = ImGui::InputInt( "##goToFrame", &frameNum, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue );
+            frameNum = std::min( std::max( frameNum, 1 ), int( numFrames ) );
+            if( clicked ) ZoomToRange( m_worker.GetFrameBegin( *m_frames, frameNum - frameOffset ), m_worker.GetFrameEnd( *m_frames, frameNum - frameOffset ) );
+            ImGui::EndPopup();
+        }
     }
 
     {
@@ -1085,6 +1090,7 @@ bool View::DrawImpl()
             if( std::chrono::duration_cast<std::chrono::milliseconds>( now - m_firstFrameTime ).count() > 500 )
             {
                 m_firstFrame = false;
+                m_tc.FirstFrameExpired();
             }
         }
     }
@@ -1272,6 +1278,12 @@ bool View::Save( const char* fn, FileWrite::Compression comp, int zlevel, bool b
     } );
 
     return true;
+}
+
+void View::HighlightThread( uint64_t thread )
+{
+    m_drawThreadMigrations = thread;
+    m_drawThreadHighlight = thread;
 }
 
 }

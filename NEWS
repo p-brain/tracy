@@ -21,6 +21,8 @@ v0.x.x (xxxx-xx-xx)
 - Tracy macros now require to be terminated with a semicolon.
 - The undocumented ___tracy_demangle() function API has been changed. Please
   refer to the source code for further instructions.
+- The parameter callback and its registration macro have been extended to
+  include user data pointer. You will need to update your code accordingly.
 - Plots visualization has been improved.
   - Each plot now has its own color, which can also be defined by the user.
   - The area below the plot is now optionally filled with a color.
@@ -70,6 +72,25 @@ v0.x.x (xxxx-xx-xx)
 - Added context menu for timeline labels. Currently the only option is to hide
   the selected thread, plot, etc.
 - You can now provide custom source file contents through a profiler callback.
+- Exposed Tracy version to client applications (available through the
+  common/TracyVersion.hpp header file).
+- D3D12 instrumentation is now thread-safe.
+- Timeline can be now navigated with WASD keys.
+- Symbol file paths are now normalized on libbacktrace systems. For example,
+  instead of "/usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/12.2.0/../../../../
+  include/c++/12.2.0/bits/std_mutex.h" Tracy will now report such file as
+  "/usr/include/c++/12.2.0/bits/std_mutex.h".
+- The import-chrome utility interprets Instant (`i`/`I`) events where the
+  `name` field contains the word `frame` as a frame event. The `name` is the
+  frame set name.
+- Frame data won't be displayed if there was no frame instrumentation in the
+  profiling session.
+  - Note that some automated functionality (e.g. vertical synchronization
+    capture) may automatically generate frame data, which will force frames to
+    be displayed.
+- Tracy threads will now be collapsed by default on the timeline.
+- Clicking on a local thread in the CPU data view will make the thread visible
+  and uncollapsed on the timeline.
 
 
 v0.8.2 (2022-06-28)

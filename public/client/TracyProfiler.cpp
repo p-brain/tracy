@@ -106,7 +106,7 @@ extern "C" typedef BOOL (WINAPI *t_GetLogicalProcessorInformationEx)( LOGICAL_PR
 #endif
 
 #if !defined _WIN32 && ( defined __i386 || defined _M_IX86 || defined __x86_64__ || defined _M_X64 )
-#  include <cpuid.h>
+#  include "TracyCpuid.hpp"
 #endif
 
 #if !( ( defined _WIN32 && _WIN32_WINNT >= _WIN32_WINNT_VISTA ) || defined __linux__ )
@@ -3796,7 +3796,7 @@ void Profiler::HandleParameter( uint64_t payload )
     assert( m_paramCallback );
     const auto idx = uint32_t( payload >> 32 );
     const auto val = int32_t( payload & 0xFFFFFFFF );
-    m_paramCallback( idx, val );
+    m_paramCallback( m_paramCallbackData, idx, val );
     AckServerQuery();
 }
 

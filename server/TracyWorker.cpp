@@ -29,11 +29,11 @@
 #include "../public/common/TracySystem.hpp"
 #include "../public/common/TracyYield.hpp"
 #include "../public/common/TracyStackFrames.hpp"
+#include "../public/common/TracyVersion.hpp"
 #include "TracyFileRead.hpp"
 #include "TracyFileWrite.hpp"
 #include "TracySort.hpp"
 #include "TracyTaskDispatch.hpp"
-#include "TracyVersion.hpp"
 #include "TracyWorker.hpp"
 
 namespace tracy
@@ -424,21 +424,46 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
         }
     }
 
+    std::unordered_map<std::string, uint64_t> frameNames;
+
     for( auto& v : messages )
     {
-        auto msg = m_slab.Alloc<MessageData>();
-        msg->time = v.timestamp;
-        msg->ref = StringRef( StringRef::Type::Idx, StoreString( v.message.c_str(), v.message.size() ).idx );
-        msg->thread = CompressThread( v.tid );
-        msg->color = 0xFFFFFFFF;
-        msg->callstack.SetVal( 0 );
-
-        if( m_threadCtx != v.tid )
+        // There is no specific chrome-tracing type for frame events. We use messages that contain the word "frame"
+        std::string lower( v.message );
+        std::transform( lower.begin(), lower.end(), lower.begin(), []( char c ) { return char( std::tolower( c ) ); } );
+        if( lower.find( "frame" ) != std::string::npos )
         {
-            m_threadCtx = v.tid;
-            m_threadCtxData = nullptr;
+            // Reserve 0 as the default FrameSet, since it replaces the name with "Frame" and we want to keep our custom names.
+            auto result = frameNames.emplace( v.message, frameNames.size() + 1 );
+            auto fd = m_data.frames.Retrieve( result.first->second, [&] ( uint64_t name ) {
+                auto fd = m_slab.AllocInit<FrameData>();
+                fd->name = name;
+                fd->continuous = 1;
+                return fd;
+            }, [&] ( uint64_t name ) {
+                HandleFrameName( name, v.message.c_str(), v.message.length() );
+            });
+
+            int64_t time = v.timestamp;
+            fd->frames.push_back( FrameEvent{ time, -1, -1 } );
+            if ( m_data.lastTime < time ) m_data.lastTime = time;
         }
-        InsertMessageData( msg );
+        else
+        {
+            auto msg = m_slab.Alloc<MessageData>();
+            msg->time = v.timestamp;
+            msg->ref = StringRef( StringRef::Type::Idx, StoreString( v.message.c_str(), v.message.size() ).idx );
+            msg->thread = CompressThread( v.tid );
+            msg->color = 0xFFFFFFFF;
+            msg->callstack.SetVal( 0 );
+
+            if( m_threadCtx != v.tid )
+            {
+                m_threadCtx = v.tid;
+                m_threadCtxData = nullptr;
+            }
+            InsertMessageData( msg );
+        }
     }
 
     for( auto& v : plots )
@@ -513,19 +538,23 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
         }
     }
 
-    m_data.framesBase = m_data.frames.Retrieve( 0, [this] ( uint64_t name ) {
-        auto fd = m_slab.AllocInit<FrameData>();
-        fd->name = name;
-        fd->continuous = 1;
-        return fd;
-    }, [this] ( uint64_t name ) {
-        assert( name == 0 );
-        char tmp[6] = "Frame";
-        HandleFrameName( name, tmp, 5 );
-    } );
+    // Add a default frame if we didn't have any framesets
+    if( frameNames.empty() )
+    {
+        m_data.framesBase = m_data.frames.Retrieve( 0, [this] ( uint64_t name ) {
+            auto fd = m_slab.AllocInit<FrameData>();
+            fd->name = name;
+            fd->continuous = 1;
+            return fd;
+        }, [this] ( uint64_t name ) {
+            assert( name == 0 );
+            char tmp[6] = "Frame";
+            HandleFrameName( name, tmp, 5 );
+        } );
 
-    m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
-    m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
+        m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
+        m_data.framesBase->frames.push_back( FrameEvent{ 0, -1, -1 } );
+    }
 }
 
 Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
@@ -535,8 +564,6 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     , m_inconsistentSamples( false )
 {
     auto loadStart = std::chrono::high_resolution_clock::now();
-
-    m_data.callstackPayload.push_back( nullptr );
 
     int fileVer = 0;
 
@@ -1345,7 +1372,8 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     s_loadProgress.subTotal.store( 0, std::memory_order_relaxed );
     s_loadProgress.progress.store( LoadProgress::CallStacks, std::memory_order_relaxed );
     f.Read( sz );
-    m_data.callstackPayload.reserve( sz );
+    m_data.callstackPayload.reserve_exact( sz+1, m_slab );
+    m_data.callstackPayload[0] = nullptr;
     for( uint64_t i=0; i<sz; i++ )
     {
         uint16_t csz;
@@ -1360,7 +1388,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
         auto arr = (VarArray<CallstackFrameId>*)( mem + csz * sizeof( CallstackFrameId ) );
         new(arr) VarArray<CallstackFrameId>( csz, data );
 
-        m_data.callstackPayload.push_back_no_space_check( arr );
+        m_data.callstackPayload[i+1] = arr;
     }
 
     f.Read( sz );
@@ -2368,6 +2396,12 @@ size_t Worker::GetFullFrameCount( const FrameData& fd ) const
             return sz - 1;
         }
     }
+}
+
+bool Worker::AreFramesUsed() const
+{
+    if( m_data.frames.Data().size() > 1 ) return true;
+    return m_data.framesBase->frames.size() > 2;
 }
 
 int64_t Worker::GetFrameTime( const FrameData& fd, size_t idx ) const
@@ -8249,7 +8283,7 @@ void Worker::Write( FileWrite& f, bool fiDict )
     f.Write( &sz, sizeof( sz ) );
     for( size_t i=1; i<=sz; i++ )
     {
-        auto cs = m_data.callstackPayload[i];
+        auto& cs = m_data.callstackPayload[i];
         uint16_t csz = cs->size();
         f.Write( &csz, sizeof( csz ) );
         f.Write( cs->data(), sizeof( CallstackFrameId ) * csz );
