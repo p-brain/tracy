@@ -786,29 +786,37 @@ int View::DrawZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
                 DrawLine( draw, dpos + ImVec2( pr1 + rsz, offset + ty025 ), dpos + ImVec2( pr1 + rsz, offset + ty075 ), color );
                 DrawLine( draw, dpos + ImVec2( pr1 - rsz, offset + ty025 ), dpos + ImVec2( pr1 - rsz, offset + ty075 ), color );
             }
-            if( tsz.x < zsz )
+
+            const float zonePaddingPx = 10.0f;
+            const float minTextSizePx = 20.0f;
+            const float minZoneSizePx = ( zonePaddingPx * 2.0f ) + minTextSizePx;
+            if ( zsz > minZoneSizePx )
             {
-                const auto x = ( ev.Start() - m_vd.zvStart ) * pxns + ( ( end - ev.Start() ) * pxns - tsz.x ) / 2;
-                if( x < 0 || x > w - tsz.x )
+                ImVec2 vPadding = ImVec2( zonePaddingPx, 0.0f );
+                if ( tsz.x < ( zsz - ( zonePaddingPx * 2.0f ) ) )
                 {
-                    ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                    DrawTextContrast( draw, wpos + ImVec2( std::max( std::max( 0., px0 ), std::min( double( w - tsz.x ), x ) ), offset ), 0xFFFFFFFF, zoneName );
-                    ImGui::PopClipRect();
-                }
-                else if( ev.Start() == ev.End() )
-                {
-                    DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
+                    const auto x = ( ev.Start() - m_vd.zvStart ) * pxns + ( ( end - ev.Start() ) * pxns - tsz.x ) / 2;
+                    if ( x < zonePaddingPx || x > w - tsz.x )
+                    {
+                        ImGui::PushClipRect( wpos + vPadding + ImVec2( px0, offset ), wpos - vPadding + ImVec2( px1, offset + tsz.y * 2 ), true );
+                        DrawTextContrast( draw, wpos + ImVec2( std::max( std::max( double( zonePaddingPx ), px0 ), std::min( double( w - tsz.x ), x ) ), offset ), 0xFFFFFFFF, zoneName );
+                        ImGui::PopClipRect();
+                    }
+                    else if( ev.Start() == ev.End() )
+                    {
+                        DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
+                    }
+                    else
+                    {
+                        DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFFFFFFFF, zoneName );
+                    }
                 }
                 else
                 {
-                    DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFFFFFFFF, zoneName );
+                    ImGui::PushClipRect( wpos + vPadding + ImVec2( px0, offset ), wpos - vPadding + ImVec2( px1, offset + tsz.y * 2 ), true );
+                    DrawTextContrast( draw, wpos + vPadding + ImVec2( std::max( int64_t( 0 ), ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
+                    ImGui::PopClipRect();
                 }
-            }
-            else
-            {
-                ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                DrawTextContrast( draw, wpos + ImVec2( std::max( int64_t( 0 ), ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
-                ImGui::PopClipRect();
             }
 
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
