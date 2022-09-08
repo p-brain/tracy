@@ -714,6 +714,7 @@ int View::DrawZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
         {
             const auto zoneColor = GetZoneColorData( ev, tid, depth );
             const char* zoneName = m_worker.GetZoneName( ev );
+            const auto ztime = m_worker.GetZoneEnd( ev ) - ev.Start();
 
             if( ev.HasChildren() )
             {
@@ -726,6 +727,12 @@ int View::DrawZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, co
             {
                 zoneName = ShortenZoneName( m_shortenName, zoneName, tsz, zsz );
             }
+
+            // Add zone duration to the name
+            static char zoneNameTime[1024];
+            snprintf( zoneNameTime, 1024, "%s [%s]", zoneName, TimeToString( ztime ) );
+            zoneName = &zoneNameTime[0];
+            tsz = ImGui::CalcTextSize( zoneName );
 
             const auto pr0 = ( ev.Start() - m_vd.zvStart ) * pxns;
             const auto pr1 = ( end - m_vd.zvStart ) * pxns;
