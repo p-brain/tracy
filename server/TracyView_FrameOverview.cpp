@@ -59,7 +59,7 @@ void View::DrawFrames()
     const auto scale = GetScale();
     const auto Height = 50 * scale * m_vd.flFrameHeightScale;
 
-    constexpr uint64_t MaxFrameTime = 50 * 1000 * 1000;  // 50ms
+    const uint64_t MaxFrameTime = m_vd.frameOverviewMaxTimeMS * 1000 * 1000;  // 50ms
 
     ImGuiWindow* window = ImGui::GetCurrentWindowRead();
     if( window->SkipItems ) return;

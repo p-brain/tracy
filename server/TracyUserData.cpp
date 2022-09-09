@@ -116,6 +116,7 @@ void UserData::LoadState( ViewData& data )
             fread( &data.ghostZones, 1, sizeof( data.ghostZones ), f );
             fread( &data.frameTarget, 1, sizeof( data.frameTarget ), f );
             fread( &data.flFrameHeightScale, 1, sizeof( data.flFrameHeightScale ), f );
+            fread( &data.frameOverviewMaxTimeMS, 1, sizeof( data.frameOverviewMaxTimeMS ), f );
         }
         fclose( f );
     }
@@ -166,6 +167,7 @@ void UserData::SaveState( const ViewData& data )
         fwrite( &data.ghostZones, 1, sizeof( data.ghostZones ), f );
         fwrite( &data.frameTarget, 1, sizeof( data.frameTarget ), f );
         fwrite( &data.flFrameHeightScale, 1, sizeof( data.flFrameHeightScale ), f );
+        fwrite( &data.frameOverviewMaxTimeMS, 1, sizeof( data.frameOverviewMaxTimeMS ), f );
         fclose( f );
     }
 }

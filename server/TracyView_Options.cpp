@@ -30,6 +30,14 @@ void View::DrawOptions()
     ImGui::Text( "Frames Height Scale" ); ImGui::SameLine();
     ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3fx", ImGuiSliderFlags_AlwaysClamp );
 
+    ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
+    ImGui::SetNextItemWidth( 90 * scale );
+    if ( ImGui::InputInt( "Frames Max Time", &m_vd.frameOverviewMaxTimeMS ) )
+    {
+        if ( m_vd.frameOverviewMaxTimeMS < 1 ) m_vd.frameOverviewMaxTimeMS = 1;
+    }
+    ImGui::PopStyleVar();
+
     ImGui::Separator();
 
     bool val = m_vd.drawEmptyLabels;
