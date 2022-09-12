@@ -1349,6 +1349,31 @@ void View::DrawFindZone()
 
         ImGui::Separator();
         SmallCheckbox( "Show zone time in frames", &m_findZone.showZoneInFrames );
+        if ( zoneData.zones.size() > 0 )
+        {
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_FA_SIGNATURE " Plot zone" ) )
+            {
+                const char *szPlotName = "";
+                const ZoneEvent &ev = *zoneData.zones[ 0 ].Zone();
+                auto &srcloc = m_worker.GetSourceLocation( m_findZone.match[ m_findZone.selMatch ] );
+
+                if ( m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).name.Active() )
+                {
+                    szPlotName = m_worker.GetString( m_worker.GetZoneExtra( ev ).name );
+                }
+                else if ( srcloc.name.active )
+                {
+                    szPlotName = m_worker.GetString( srcloc.name );
+                }
+                else
+                {
+                    szPlotName = m_worker.GetString( srcloc.function );
+                }
+                
+                m_worker.CreatePlotForSourceLocation( szPlotName, m_findZone.match[ m_findZone.selMatch ] );
+            }
+        }
         ImGui::Separator();
 
         ImGui::TextUnformatted( "Found zones:" );

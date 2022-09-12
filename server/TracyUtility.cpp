@@ -157,6 +157,8 @@ uint32_t GetPlotColor( const PlotData& plot, const Worker& worker )
         return 0xFF2266CC;
     case PlotType::SysTime:
         return 0xFFBAB220;
+    case PlotType::Zone:
+        return 0xFF44FF44;
     default:
         assert( false );
         return 0;

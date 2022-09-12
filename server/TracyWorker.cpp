@@ -2917,6 +2917,56 @@ std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool 
 }
 
 #ifndef TRACY_NO_STATISTICS
+void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc )
+{
+    assert( AreSourceLocationZonesReady() );
+    auto it = m_data.sourceLocationZones.find( srcloc );
+    if ( it != m_data.sourceLocationZones.end() )
+    {
+        const SourceLocationZones &srcLoc = it->second;
+        const SortedVector<ZoneThreadData, SourceLocationZones::ZtdSort> &zones = srcLoc.zones;
+
+        // Store plot name
+        const auto lenPlotName = strlen( szPlotName );
+        auto ptr = m_slab.Alloc<char>( lenPlotName + 1 );
+        memcpy( ptr, szPlotName, lenPlotName );
+        ptr[ lenPlotName ] = '\0';
+
+        uint64_t nPlotName = ( uint64_t )ptr;
+        auto it = m_data.strings.find( nPlotName );
+        assert( it == m_data.strings.end() );
+        if ( it == m_data.strings.end() )
+        {
+            m_data.strings.emplace( nPlotName, ptr );
+        }
+        
+        // Create plot
+        PlotData *plot = m_slab.AllocInit<PlotData>();
+        plot->data.reserve( zones.size() );
+
+        plot->name = nPlotName;
+        plot->type = PlotType::Zone;
+        plot->format = PlotValueFormatting::Number;
+        plot->showSteps = 0;
+        plot->fill = 1;
+        plot->color = 0;
+
+        plot->min = srcLoc.min / ( 1000.0 * 1000.0 );
+        plot->max = srcLoc.max / ( 1000.0 * 1000.0 );
+        plot->sum = srcLoc.total / ( 1000.0 * 1000.0 );
+        for ( const ZoneThreadData &zoneThreadData : zones )
+        {
+            const ZoneEvent &zone = *zoneThreadData.Zone();
+            int64_t zoneDurationNs = GetZoneEndDirect( zone ) - zone.Start();
+            double zoneDurationMs = zoneDurationNs / ( 1000.0 * 1000.0 );
+            
+            plot->data.push_back( { zone.Start(), zoneDurationMs } );
+        }
+
+        m_data.plots.Data().push_back( plot );
+    }
+}
+
 Worker::SourceLocationZones& Worker::GetZonesForSourceLocation( int16_t srcloc )
 {
     assert( AreSourceLocationZonesReady() );
@@ -8208,11 +8258,11 @@ void Worker::Write( FileWrite& f, bool fiDict )
     }
 
     sz = m_data.plots.Data().size();
-    for( auto& plot : m_data.plots.Data() ) { if( plot->type == PlotType::Memory ) sz--; }
+    for( auto& plot : m_data.plots.Data() ) { if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone ) ) sz--; }
     f.Write( &sz, sizeof( sz ) );
     for( auto& plot : m_data.plots.Data() )
     {
-        if( plot->type == PlotType::Memory ) continue;
+        if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone ) ) continue;
         f.Write( &plot->type, sizeof( plot->type ) );
         f.Write( &plot->format, sizeof( plot->format ) );
         f.Write( &plot->showSteps, sizeof( plot->showSteps ) );

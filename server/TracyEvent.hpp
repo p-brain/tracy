@@ -727,7 +727,8 @@ enum class PlotType : uint8_t
 {
     User,
     Memory,
-    SysTime
+    SysTime,
+    Zone
 };
 
 enum class PlotValueFormatting : uint8_t

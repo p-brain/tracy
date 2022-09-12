@@ -25,6 +25,7 @@ const char* TimelineItemPlot::HeaderLabel() const
     switch( m_plot->type )
     {
     case PlotType::User:
+    case PlotType::Zone:
         return m_worker.GetString( m_plot->name );
     case PlotType::Memory:
         if( m_plot->name == 0 )

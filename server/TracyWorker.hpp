@@ -598,6 +598,7 @@ public:
     const unordered_flat_map<uint64_t, SymbolData>& GetSymbolMap() const { return m_data.symbolMap; }
 
 #ifndef TRACY_NO_STATISTICS
+    void CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc );
     SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc );
     const SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc ) const;
     const unordered_flat_map<int16_t, SourceLocationZones>& GetSourceLocationZones() const { return m_data.sourceLocationZones; }
