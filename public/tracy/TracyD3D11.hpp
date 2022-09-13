@@ -333,6 +333,8 @@ public:
         Profiler::QueueSerialFinish();
     }
 
+#ifdef TRACY_HAS_CALLSTACK
+
     tracy_force_inline D3D11ZoneScope(D3D11Ctx* ctx, uint32_t line, const char* source, size_t sourceSz, const char* function, size_t functionSz, const char* name, size_t nameSz, int depth, bool active)
 #ifdef TRACY_ON_DEMAND
         : m_active(active&& GetProfiler().IsConnected())
@@ -361,6 +363,8 @@ public:
 
         Profiler::QueueSerialFinish();
     }
+
+#endif
 
     tracy_force_inline ~D3D11ZoneScope()
     {
