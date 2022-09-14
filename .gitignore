@@ -44,3 +44,4 @@ extra/tracy-build
 compile_commands.json
 *.TaskCanvasSL
 */build/win32/*
+*.tss
