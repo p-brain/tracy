@@ -843,8 +843,6 @@ LONG WINAPI CrashFilter( PEXCEPTION_POINTERS pExp )
     GetProfiler().RequestShutdown();
     while( !GetProfiler().HasShutdownFinished() ) { std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) ); };
 
-    TerminateProcess( GetCurrentProcess(), 1 );
-
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
@@ -1485,7 +1483,6 @@ Profiler::~Profiler()
 #ifdef TRACY_HAS_CALLSTACK
     s_symbolThread->~Thread();
     tracy_free( s_symbolThread );
-    s_symbolThreadGone.store( true, std::memory_order_release );
 #endif
 
 #ifndef TRACY_NO_FRAME_IMAGE
@@ -3310,7 +3307,11 @@ void Profiler::SymbolWorker()
 #ifdef TRACY_ON_DEMAND
         if( !IsConnected() )
         {
-            if( shouldExit ) return;
+            if( shouldExit )
+            {
+                s_symbolThreadGone.store( true, std::memory_order_release );
+                return;
+            }
             while( m_symbolQueue.front() ) m_symbolQueue.pop();
             std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
             continue;
@@ -3324,7 +3325,11 @@ void Profiler::SymbolWorker()
         }
         else
         {
-            if( shouldExit ) return;
+            if( shouldExit )
+            {
+                s_symbolThreadGone.store( true, std::memory_order_release );
+                return;
+            }
             std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
         }
     }
@@ -4164,9 +4169,44 @@ TRACY_API uint64_t ___tracy_alloc_srcloc_name( uint32_t line, const char* source
     return tracy::Profiler::AllocSourceLocation( line, source, sourceSz, function, functionSz, name, nameSz );
 }
 
+TRACY_API void ___tracy_emit_gpu_zone_begin( const struct ___tracy_gpu_zone_begin_data data )
+{
+    TracyLfqPrepareC( tracy::QueueType::GpuZoneBegin );
+    tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuNewContext.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
+    tracy::MemWrite( &item->gpuZoneBegin.queryId, data.queryId );
+    tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
+    TracyLfqCommitC;
+}
+
+TRACY_API void ___tracy_emit_gpu_zone_begin_callstack( const struct ___tracy_gpu_zone_begin_callstack_data data )
+{
+    tracy::GetProfiler().SendCallstack( data.depth );
+    TracyLfqPrepareC( tracy::QueueType::GpuZoneBeginCallstack );
+    tracy::MemWrite( &item->gpuZoneBegin.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuZoneBegin.queryId, data.queryId );
+    tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
+    tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
+    TracyLfqCommitC;
+}
+
 TRACY_API void ___tracy_emit_gpu_zone_begin_alloc( const struct ___tracy_gpu_zone_begin_data data )
 {
     TracyLfqPrepareC( tracy::QueueType::GpuZoneBeginAllocSrcLoc  );
+    tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuNewContext.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
+    tracy::MemWrite( &item->gpuZoneBegin.queryId, data.queryId );
+    tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
+    TracyLfqCommitC;
+}
+
+TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_callstack( const struct ___tracy_gpu_zone_begin_callstack_data data )
+{
+    tracy::GetProfiler().SendCallstack( data.depth );
+    TracyLfqPrepareC( tracy::QueueType::GpuZoneBeginAllocSrcLocCallstack  );
     tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
     tracy::MemWrite( &item->gpuNewContext.thread, tracy::GetThreadHandle() );
     tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
@@ -4219,10 +4259,56 @@ TRACY_API void ___tracy_emit_gpu_context_name( const struct ___tracy_gpu_context
     TracyLfqCommitC;
 }
 
+TRACY_API void ___tracy_emit_gpu_calibration( const struct ___tracy_gpu_calibration_data data )
+{
+    TracyLfqPrepareC( tracy::QueueType::GpuCalibration );
+    tracy::MemWrite( &item->gpuCalibration.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuCalibration.gpuTime, data.gpuTime );
+    tracy::MemWrite( &item->gpuCalibration.cpuDelta, data.cpuDelta );
+    tracy::MemWrite( &item->gpuCalibration.context, data.context );
+    TracyLfqCommitC;
+}
+
+TRACY_API void ___tracy_emit_gpu_zone_begin_serial( const struct ___tracy_gpu_zone_begin_data data )
+{
+    auto item = tracy::Profiler::QueueSerial();
+    tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuZoneBeginSerial );
+    tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
+    tracy::MemWrite( &item->gpuZoneBegin.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.queryId, data.queryId );
+    tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
+    tracy::Profiler::QueueSerialFinish();
+}
+
+TRACY_API void ___tracy_emit_gpu_zone_begin_callstack_serial( const struct ___tracy_gpu_zone_begin_callstack_data data )
+{
+    auto item = tracy::Profiler::QueueSerialCallstack( tracy::Callstack( data.depth ) );
+    tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuZoneBeginCallstackSerial );
+    tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
+    tracy::MemWrite( &item->gpuZoneBegin.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.queryId, data.queryId );
+    tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
+    tracy::Profiler::QueueSerialFinish();
+}
+
 TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_serial( const struct ___tracy_gpu_zone_begin_data data )
 {
     auto item = tracy::Profiler::QueueSerial();
     tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuZoneBeginAllocSrcLocSerial );
+    tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuNewContext.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
+    tracy::MemWrite( &item->gpuZoneBegin.queryId, data.queryId );
+    tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
+    tracy::Profiler::QueueSerialFinish();
+}
+
+TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_callstack_serial( const struct ___tracy_gpu_zone_begin_callstack_data data )
+{
+    auto item = tracy::Profiler::QueueSerialCallstack( tracy::Callstack( data.depth ) );
+    tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuZoneBeginAllocSrcLocCallstackSerial );
     tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
     tracy::MemWrite( &item->gpuNewContext.thread, tracy::GetThreadHandle() );
     tracy::MemWrite( &item->gpuZoneBegin.srcloc, data.srcloc );
@@ -4276,6 +4362,17 @@ TRACY_API void ___tracy_emit_gpu_context_name_serial( const struct ___tracy_gpu_
     tracy::MemWrite( &item->gpuContextNameFat.context, data.context );
     tracy::MemWrite( &item->gpuContextNameFat.ptr, (uint64_t)ptr );
     tracy::MemWrite( &item->gpuContextNameFat.size, data.len );
+    tracy::Profiler::QueueSerialFinish();
+}
+
+TRACY_API void ___tracy_emit_gpu_calibration_serial( const struct ___tracy_gpu_calibration_data data )
+{
+    auto item = tracy::Profiler::QueueSerial();
+    tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuCalibration );
+    tracy::MemWrite( &item->gpuCalibration.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuCalibration.gpuTime, data.gpuTime );
+    tracy::MemWrite( &item->gpuCalibration.cpuDelta, data.cpuDelta );
+    tracy::MemWrite( &item->gpuCalibration.context, data.context );
     tracy::Profiler::QueueSerialFinish();
 }
 

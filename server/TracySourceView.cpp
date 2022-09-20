@@ -209,7 +209,9 @@ static void PrintSourceFragment( const SourceContents& src, uint32_t srcline, in
                     ImGui::TextUnformatted( ptr, it->begin );
                     ImGui::SameLine( 0, 0 );
                 }
-                TextColoredUnformatted( i == srcline-1 ? SyntaxColors[(int)it->color] : SyntaxColorsDimmed[(int)it->color], it->begin, it->end );
+                auto color = SyntaxColors[(int)it->color];
+                if( i != srcline-1 ) color = ( color & 0xFFFFFF ) | 0x99000000;
+                TextColoredUnformatted( color, it->begin, it->end );
                 ImGui::SameLine( 0, 0 );
                 ptr = it->end;
                 ++it;
@@ -701,11 +703,24 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
             const auto& detail = *op.detail;
             bool hasJump = false;
             bool jumpConditional = false;
+            OpType opType = OpType::None;
             for( auto j=0; j<detail.groups_count; j++ )
             {
                 if( detail.groups[j] == CS_GRP_JUMP || detail.groups[j] == CS_GRP_CALL || detail.groups[j] == CS_GRP_RET )
                 {
                     hasJump = true;
+                    break;
+                }
+            }
+            for( auto j=0; j<detail.groups_count; j++ )
+            {
+                if( detail.groups[j] == CS_GRP_JUMP && opType < OpType::Jump ) opType = OpType::Jump;
+                else if( detail.groups[j] == CS_GRP_BRANCH_RELATIVE && opType < OpType::Branch ) opType = OpType::Branch;
+                else if( detail.groups[j] == CS_GRP_CALL && opType < OpType::Call ) opType = OpType::Call;
+                else if( detail.groups[j] == CS_GRP_RET && opType < OpType::Ret ) opType = OpType::Ret;
+                else if( detail.groups[j] == CS_GRP_PRIVILEGE && opType < OpType::Privileged )
+                {
+                    opType = OpType::Privileged;
                     break;
                 }
             }
@@ -875,7 +890,9 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
                     }
                 }
             }
-            m_asm.emplace_back( AsmLine { op.address, jumpAddr, op.mnemonic, op.op_str, (uint8_t)op.size, leaData, jumpConditional, std::move( params ) } );
+            m_asm.emplace_back( AsmLine { op.address, jumpAddr, op.mnemonic, op.op_str, (uint8_t)op.size, leaData, opType, jumpConditional, std::move( params ) } );
+            const auto& operands = m_asm.back().operands;
+            m_asm.back().opTokens = m_tokenizer.TokenizeAsm( operands.c_str(), operands.c_str() + operands.size() );
 
 #if CS_API_MAJOR >= 4
             auto& entry = m_asm.back();
@@ -3304,6 +3321,30 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
     DrawLine( draw, dpos + ImVec2( 0, ty ), dpos + ImVec2( w, ty ), 0x08FFFFFF );
 }
 
+static tracy_force_inline uint32_t AsmColor( uint32_t base, bool inContext, int isSelected )
+{
+    if( inContext )
+    {
+        switch( isSelected )
+        {
+        case 0: return base;
+        case 1: return 0xFFFFFFFF;
+        case 2: return 0xFF2F2FFF;
+        default: assert( false ); return 0;
+        }
+    }
+    else
+    {
+        switch( isSelected )
+        {
+        case 0: return ( base & 0xFFFFFF ) | 0x88000000;
+        case 1: return 0x88FFFFFF;
+        case 2: return 0x882F2FFF;
+        default: assert( false ); return 0;
+        }
+    }
+}
+
 void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const AddrStatData& as, Worker& worker, uint64_t& jumpOut, int maxAddrLen, View& view )
 {
     const auto scale = GetScale();
@@ -3735,7 +3776,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
     if( m_showJumps )
     {
         ImGui::SameLine( 0, 0 );
-        const auto xoff = ImGui::GetCursorScreenPos().x - wpos.x + round( ty * 0.66f );
+        const auto xoff = round( ImGui::GetCursorScreenPos().x - wpos.x + ( ty * 0.66f ) );
         m_jumpOffset = xoff;
 
         const auto JumpArrow = JumpArrowBase * ty / 15;
@@ -3839,70 +3880,19 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         }
     }
 
-    const auto msz = line.mnemonic.size();
-    memcpy( buf, line.mnemonic.c_str(), msz );
-    memset( buf+msz, ' ', m_maxMnemonicLen-msz );
-    bool hasJump = false;
-    if( line.jumpAddr != 0 )
+    const bool inContext = IsInContext( worker, line.addr );
+    int isSelected = asmIdx == m_asmSelected;
+    if( !isSelected && line.regData[0] != 0 )
     {
-        auto lit = m_locMap.find( line.jumpAddr );
-        if( lit != m_locMap.end() )
-        {
-            char tmp[64];
-            sprintf( tmp, ".L%" PRIu32, lit->second );
-            strcpy( buf+m_maxMnemonicLen, tmp );
-            hasJump = true;
-        }
-    }
-    if( !hasJump )
-    {
-        memcpy( buf+m_maxMnemonicLen, line.operands.c_str(), line.operands.size() + 1 );
-    }
-
-    const bool isInContext = IsInContext( worker, line.addr );
-    if( asmIdx == m_asmSelected )
-    {
-        TextColoredUnformatted( ImVec4( 1, 0.25f, 0.25f, isInContext ? 1.f : 0.5f ), buf );
-    }
-    else if( line.regData[0] != 0 )
-    {
-        bool hasDepencency = false;
         int idx = 0;
-        for(;;)
+        while( line.regData[idx] != 0 )
         {
-            if( line.regData[idx] == 0 ) break;
             if( line.regData[idx] & ( WriteBit | ReadBit ) )
             {
-                hasDepencency = true;
+                isSelected = 2;
                 break;
             }
             idx++;
-        }
-        if( hasDepencency )
-        {
-            TextColoredUnformatted( ImVec4( 1, 0.5f, 1, isInContext ? 1.f : 0.5f ), buf );
-        }
-        else
-        {
-            if( isInContext )
-            {
-                ImGui::TextUnformatted( buf );
-            }
-            else
-            {
-                TextDisabledUnformatted( buf );
-            }
-        }
-    }
-    else
-    {
-        if( isInContext )
-        {
-            ImGui::TextUnformatted( buf );
-        }
-        else
-        {
-            TextDisabledUnformatted( buf );
         }
     }
 
@@ -3915,9 +3905,77 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         jumpOffset = 0;
         jumpBase = worker.GetSymbolForAddress( line.jumpAddr, jumpOffset );
         auto jumpSym = jumpBase == 0 ? worker.GetSymbolData( line.jumpAddr ) : worker.GetSymbolData( jumpBase );
-        if( jumpSym ) jumpName = worker.GetString( jumpSym->name );
-        if( jumpName ) normalized = view.GetShortenName() != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, jumpName ) : jumpName;
+        if( jumpSym )
+        {
+            if( worker.HasInlineSymbolAddresses() )
+            {
+                const auto symAddr = worker.GetInlineSymbolForAddress( line.jumpAddr );
+                if( symAddr != 0 )
+                {
+                    const auto symData = worker.GetSymbolData( symAddr );
+                    if( symData ) jumpName = worker.GetString( symData->name );
+                }
+            }
+            if( !jumpName ) jumpName = worker.GetString( jumpSym->name );
+            if( jumpName ) normalized = view.GetShortenName() != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, jumpName ) : jumpName;
+        }
     }
+
+    ImGui::BeginGroup();
+    TextColoredUnformatted( AsmColor( AsmOpTypeColors[(int)line.opType], inContext, isSelected ), line.mnemonic.c_str() );
+    ImGui::SameLine( 0, ImGui::CalcTextSize( " " ).x * ( m_maxMnemonicLen - line.mnemonic.size() ) );
+    bool hasJump = false;
+    if( line.jumpAddr != 0 )
+    {
+        auto lit = m_locMap.find( line.jumpAddr );
+        if( lit != m_locMap.end() )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Text, AsmColor( AsmSyntaxColors[(int)Tokenizer::AsmTokenColor::Label], inContext, isSelected ) );
+            ImGui::Text( ".L%" PRIu32, lit->second );
+            ImGui::PopStyleColor();
+            hasJump = true;
+        }
+    }
+    if( !hasJump && jumpName && jumpBase != m_baseAddr )
+    {
+        ImGui::PushStyleColor( ImGuiCol_Text, AsmColor( AsmSyntaxColors[(int)Tokenizer::AsmTokenColor::Label], inContext, isSelected ) );
+        if( jumpOffset == 0 )
+        {
+            ImGui::Text( "%s", normalized );
+        }
+        else
+        {
+            ImGui::Text( "%s+%" PRIu32, normalized, jumpOffset );
+        }
+        ImGui::PopStyleColor();
+        hasJump = true;
+    }
+    if( !hasJump )
+    {
+        auto ptr = line.operands.c_str();
+        auto end = ptr + line.operands.size();
+        auto it = line.opTokens.begin();
+        while( ptr < end )
+        {
+            if( it == line.opTokens.end() )
+            {
+                ImGui::TextUnformatted( ptr, end );
+                ImGui::SameLine( 0, 0 );
+                break;
+            }
+            if( ptr < it->begin )
+            {
+                ImGui::TextUnformatted( ptr, it->begin );
+                ImGui::SameLine( 0, 0 );
+            }
+            TextColoredUnformatted( AsmColor( AsmSyntaxColors[(int)it->color], inContext, isSelected ), it->begin, it->end );
+            ImGui::SameLine( 0, 0 );
+            ptr = it->end;
+            ++it;
+        }
+        ImGui::ItemSize( ImVec2( 0, 0 ), 0 );
+    }
+    ImGui::EndGroup();
 
     if( ImGui::IsItemHovered() )
     {
@@ -3928,7 +3986,21 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
             ImGui::BeginTooltip();
             if( jumpName || opdesc != 0 )
             {
-                if( opdesc != 0 ) ImGui::TextUnformatted( OpDescList[opdesc] );
+                if( opdesc != 0 )
+                {
+                    ImGui::TextUnformatted( OpDescList[opdesc] );
+                    if( line.opType == OpType::Privileged )
+                    {
+                        ImGui::SameLine();
+                        ImGui::Spacing();
+                        ImGui::SameLine();
+                        TextColoredUnformatted( AsmOpTypeColors[(int)OpType::Privileged], "privileged" );
+                    }
+                }
+                else if( line.opType == OpType::Privileged )
+                {
+                    TextColoredUnformatted( AsmOpTypeColors[(int)OpType::Privileged], "Privileged" );
+                }
                 if( jumpName )
                 {
                     if( jumpBase == m_baseAddr )
@@ -3940,7 +4012,20 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                         TextDisabledUnformatted( "External target:" );
                     }
                     ImGui::SameLine();
-                    ImGui::Text( "%s+%" PRIu32, normalized, jumpOffset );
+                    if( jumpOffset == 0 )
+                    {
+                        ImGui::Text( "%s", normalized );
+                    }
+                    else
+                    {
+                        ImGui::Text( "%s+%" PRIu32, normalized, jumpOffset );
+                    }
+                    if( normalized != jumpName )
+                    {
+                        ImGui::PushFont( m_smallFont );
+                        TextDisabledUnformatted( jumpName );
+                        ImGui::PopFont();
+                    }
                     if( jumpBase == m_baseAddr )
                     {
                         uint32_t srcline;
@@ -4079,7 +4164,20 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                 TextDisabledUnformatted( "External target:" );
             }
             ImGui::SameLine();
-            ImGui::Text( "%s+%" PRIu32, normalized, jumpOffset );
+            if( jumpOffset == 0 )
+            {
+                ImGui::Text( "%s", normalized );
+            }
+            else
+            {
+                ImGui::Text( "%s+%" PRIu32, normalized, jumpOffset );
+            }
+            if( normalized != jumpName && strcmp( normalized, jumpName ) != 0 )
+            {
+                ImGui::PushFont( m_smallFont );
+                TextDisabledUnformatted( jumpName );
+                ImGui::PopFont();
+            }
             if( jumpBase == m_baseAddr )
             {
                 uint32_t srcline;
@@ -4246,11 +4344,39 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         ImGui::SameLine();
         if( jumpBase == m_baseAddr )
         {
-            ImGui::TextDisabled( "  -> [%s+%" PRIu32"]", normalized, jumpOffset );
+            ImGui::TextDisabled( "  -> [%s]", normalized );
             if( ImGui::IsItemHovered() )
             {
                 UnsetFont();
-                TooltipNormalizedName( jumpName, normalized );
+                ImGui::BeginTooltip();
+                if( normalized != jumpName && strcmp( normalized, jumpName ) != 0 )
+                {
+                    ImGui::TextUnformatted( jumpName );
+                }
+                char tmp[32];
+                sprintf( tmp, "+%" PRIu32, jumpOffset );
+                TextFocused( "Jump target:", tmp );
+                uint32_t srcline;
+                const auto srcidx = worker.GetLocationForAddress( line.jumpAddr, srcline );
+                if( srcline != 0 )
+                {
+                    const auto fileName = worker.GetString( srcidx );
+                    if( fileName )
+                    {
+                        if( SourceFileValid( fileName, worker.GetCaptureTime(), view, worker ) )
+                        {
+                            m_sourceTooltip.Parse( fileName, worker, view );
+                            if( !m_sourceTooltip.empty() )
+                            {
+                                ImGui::Separator();
+                                SetFont();
+                                PrintSourceFragment( m_sourceTooltip, srcline );
+                                UnsetFont();
+                            }
+                        }
+                    }
+                }
+                ImGui::EndTooltip();
                 SetFont();
                 m_highlightAddr = line.jumpAddr;
                 if( ImGui::IsItemClicked() )
@@ -4263,13 +4389,10 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         }
         else
         {
-            ImGui::TextDisabled( "  [%s+%" PRIu32"]", normalized, jumpOffset );
-            if( ImGui::IsItemHovered() )
+            ImGui::TextDisabled( "  [%s]", line.operands.c_str() );
+            if( ImGui::IsItemClicked() )
             {
-                UnsetFont();
-                TooltipNormalizedName( jumpName, normalized );
-                SetFont();
-                if( ImGui::IsItemClicked() ) jumpOut = line.jumpAddr;
+                jumpOut = line.jumpAddr;
             }
         }
     }

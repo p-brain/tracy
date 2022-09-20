@@ -77,6 +77,16 @@ private:
     enum { RegMask  = 0x0FF };
     enum { FlagMask = 0xF00 };
 
+    enum class OpType : uint8_t
+    {
+        None,
+        Jump,
+        Branch,
+        Call,
+        Ret,
+        Privileged
+    };
+
     struct AsmLine
     {
         uint64_t addr;
@@ -85,8 +95,10 @@ private:
         std::string operands;
         uint8_t len;
         LeaData leaData;
+        OpType opType;
         bool jumpConditional;
         std::vector<AsmOpParams> params;
+        std::vector<Tokenizer::AsmToken> opTokens;
         union
         {
             RegsX86 readX86[12];
