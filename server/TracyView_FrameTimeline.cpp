@@ -97,6 +97,10 @@ void View::DrawTimelineFrames( const FrameData& frames )
     if( zrange.first < 0 ) return;
     if( m_worker.GetFrameBegin( frames, zrange.first ) > m_vd.zvEnd || m_worker.GetFrameEnd( frames, zrange.second ) < m_vd.zvStart ) return;
 
+    static uint32_t lineColor = 0x0;
+    double minframepx = FLT_MAX;
+
+
     const auto wpos = ImGui::GetCursorScreenPos();
     const auto dpos = wpos + ImVec2( 0.5f, 0.5f );
     const auto w = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize;
@@ -233,14 +237,37 @@ void View::DrawTimelineFrames( const FrameData& frames )
             {
                 draw->AddRectFilled( wpos + ImVec2( ( fbegin + frameTarget - m_vd.zvStart ) * pxns, 0 ), wpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, wh ), 0x224444FF );
             }
-            if( fbegin >= m_vd.zvStart && endPos != fbegin )
+            double framepxsize = double( fend - fbegin ) * pxns;
+            double allowedpx = 50.0f;
+
+            if ( lineColor )
             {
-                DrawLine( draw, dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, wh ), 0xFFFFFFFF );
+
+                if ( fbegin >= m_vd.zvStart && endPos != fbegin )
+                {
+                    DrawLine( draw, dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fbegin - m_vd.zvStart ) * pxns, wh ), lineColor );
+                }
+                if ( fend <= m_vd.zvEnd )
+                {
+                    DrawLine( draw, dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, wh ), lineColor );
+                }
             }
-            if( fend <= m_vd.zvEnd )
+
+            if ( framepxsize < minframepx )
             {
-                DrawLine( draw, dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, 0 ), dpos + ImVec2( ( fend - m_vd.zvStart ) * pxns, wh ), 0xFFFFFFFF );
+                uint32_t color = framepxsize < allowedpx * 4.0 ? 0x8FFFFFFF : 0xFFFFFFFF;
+                color = framepxsize < allowedpx * 2.0 ? 0x2FFFFFFF : color;
+                lineColor = color;
+                minframepx = framepxsize;
+
+                if ( framepxsize < allowedpx )
+                {
+                    lineColor = 0;
+                }
+
+
             }
+
             endPos = fend;
         }
 

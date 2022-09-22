@@ -33,8 +33,11 @@ struct RangeSlim
 };
 
 
+
 struct ViewData
 {
+    enum EPlotViz { Disable = 0, Top, Bottom };
+
     int64_t zvStart = 0;
     int64_t zvEnd = 0;
     int32_t frameScale = 0;
@@ -43,7 +46,7 @@ struct ViewData
     uint8_t drawGpuZones = true;
     uint8_t drawZones = true;
     uint8_t drawLocks = true;
-    uint8_t drawPlots = true;
+    uint8_t drawPlots = EPlotViz::Top;
     uint8_t onlyContendedLocks = true;
     uint8_t drawEmptyLabels = false;
     uint8_t drawFrameTargets = false;
@@ -59,6 +62,7 @@ struct ViewData
     uint32_t frameTarget = 60;
     float    flFrameHeightScale = 1.0f;
     int32_t frameOverviewMaxTimeMS = 50;
+    int32_t plotsMaxTimeMS = 50;
 };
 
 struct Annotation

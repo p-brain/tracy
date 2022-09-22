@@ -4281,6 +4281,8 @@ TRACY_API void ___tracy_emit_gpu_zone_begin_serial( const struct ___tracy_gpu_zo
     tracy::Profiler::QueueSerialFinish();
 }
 
+#ifdef TRACY_HAS_CALLSTACK
+
 TRACY_API void ___tracy_emit_gpu_zone_begin_callstack_serial( const struct ___tracy_gpu_zone_begin_callstack_data data )
 {
     auto item = tracy::Profiler::QueueSerialCallstack( tracy::Callstack( data.depth ) );
@@ -4292,6 +4294,8 @@ TRACY_API void ___tracy_emit_gpu_zone_begin_callstack_serial( const struct ___tr
     tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
     tracy::Profiler::QueueSerialFinish();
 }
+
+#endif
 
 TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_serial( const struct ___tracy_gpu_zone_begin_data data )
 {
@@ -4305,6 +4309,8 @@ TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_serial( const struct ___tracy_
     tracy::Profiler::QueueSerialFinish();
 }
 
+#ifdef TRACY_HAS_CALLSTACK
+
 TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_callstack_serial( const struct ___tracy_gpu_zone_begin_callstack_data data )
 {
     auto item = tracy::Profiler::QueueSerialCallstack( tracy::Callstack( data.depth ) );
@@ -4316,6 +4322,8 @@ TRACY_API void ___tracy_emit_gpu_zone_begin_alloc_callstack_serial( const struct
     tracy::MemWrite( &item->gpuZoneBegin.context, data.context );
     tracy::Profiler::QueueSerialFinish();
 }
+
+#endif
 
 TRACY_API void ___tracy_emit_gpu_time_serial( const struct ___tracy_gpu_time_data data )
 {

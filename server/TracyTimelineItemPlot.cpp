@@ -12,6 +12,7 @@ TimelineItemPlot::TimelineItemPlot( View& view, Worker& worker, PlotData* plot )
     : TimelineItem( view, worker )
     , m_plot( plot )
 {
+    if ( plot->type == PlotType::SysTime ) SetVisible( false ); // Default off
 }
 
 bool TimelineItemPlot::IsEmpty() const

@@ -351,10 +351,20 @@ void View::DrawTimeline()
         static char uptr;
         m_tc.AddItem<TimelineItemCpuData>( &uptr );
     }
+
+
+    if ( m_vd.drawPlots == ViewData::EPlotViz::Top )
+    {
+        for ( const auto &v : m_worker.GetPlots() )
+        {
+            m_tc.AddItem<TimelineItemPlot>( v );
+        }
+    }
+
     if( m_vd.drawZones )
     {
     
-        const auto& threadData = m_worker.GetThreadData();
+    const auto& threadData = m_worker.GetThreadData();
     if(g_bReApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
     {
         if (( threadData.size() != m_threadOrder.size() ))
@@ -396,7 +406,8 @@ void View::DrawTimeline()
             m_tc.AddItem<TimelineItemThread>( v );
         }
     }
-    if( m_vd.drawPlots )
+
+    if( m_vd.drawPlots == ViewData::EPlotViz::Bottom )
     {
         for( const auto& v : m_worker.GetPlots() )
         {

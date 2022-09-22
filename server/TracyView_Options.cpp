@@ -25,18 +25,26 @@ void View::DrawOptions()
 
     const auto scale = GetScale();
 
-    // Slider to set the frames display height
-
-    ImGui::Text( "Frames Height Scale" ); ImGui::SameLine();
-    ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3fx", ImGuiSliderFlags_AlwaysClamp );
-
-    ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
     ImGui::SetNextItemWidth( 90 * scale );
-    if ( ImGui::InputInt( "Frames Max Time", &m_vd.frameOverviewMaxTimeMS ) )
+    ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3fx", ImGuiSliderFlags_AlwaysClamp );
+    ImGui::SameLine();
+    ImGui::Text( "Frames Scale" );
+
+    ImGui::SetNextItemWidth( 90 * scale );
+    if ( ImGui::InputInt( "##Max", &m_vd.frameOverviewMaxTimeMS ) )
     {
         if ( m_vd.frameOverviewMaxTimeMS < 1 ) m_vd.frameOverviewMaxTimeMS = 1;
     }
-    ImGui::PopStyleVar();
+    ImGui::SameLine();
+    ImGui::Text( "Frames Max (ms)" );
+
+    ImGui::SetNextItemWidth( 90 * scale );
+    if ( ImGui::InputInt( "##PlotsMax", &m_vd.plotsMaxTimeMS ) )
+    {
+        if ( m_vd.plotsMaxTimeMS < 1 ) m_vd.plotsMaxTimeMS = 1;
+    }
+    ImGui::SameLine();
+    ImGui::Text( "ZonePlot Max (ms)" );
 
     ImGui::Separator();
 

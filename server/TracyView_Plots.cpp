@@ -34,8 +34,9 @@ bool View::DrawPlot( PlotData& plot, double pxns, int& offset, const ImVec2& wpo
         const auto bg = 0x22000000 | ( DarkenColorMore( color ) & 0xFFFFFF );
         const auto fill = 0x22000000 | ( DarkenColor( color ) & 0xFFFFFF );
 
-        ImGui::PushClipRect( ImVec2( 0, yPos ), ImVec2( w, yPos + PlotHeight ), true );
-        draw->AddRectFilled( ImVec2( 0, yPos ), ImVec2( w, yPos + PlotHeight ), bg );
+
+        ImGui::PushClipRect( ImVec2( dpos.x, yPos ), ImVec2( dpos.x+w, yPos + PlotHeight ), true );
+        draw->AddRectFilled( ImVec2( dpos.x, yPos ), ImVec2( dpos.x+w, yPos + PlotHeight ), bg );
 
         auto it = std::lower_bound( vec.begin(), vec.end(), m_vd.zvStart - m_worker.GetDelay(), [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
         auto end = std::lower_bound( it, vec.end(), m_vd.zvEnd + m_worker.GetResolution(), [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
@@ -64,7 +65,7 @@ bool View::DrawPlot( PlotData& plot, double pxns, int& offset, const ImVec2& wpo
         }
         if ( plot.type == PlotType::Zone )
         {
-            max = ( double ) m_vd.frameOverviewMaxTimeMS;
+            max = ( double ) m_vd.plotsMaxTimeMS;
             min = 0.0;
         }
         if( min == max )
