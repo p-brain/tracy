@@ -568,9 +568,20 @@ void View::DrawOptions()
     if( !m_worker.GetPlots().empty() )
     {
         ImGui::Separator();
-        val = m_vd.drawPlots;
-        ImGui::Checkbox( ICON_FA_SIGNATURE " Draw plots", &val );
-        m_vd.drawPlots = val;
+
+        ImGui::Text( ICON_FA_SIGNATURE "Draw plots:" );
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 140 * scale );
+        
+        if ( ImGui::BeginCombo( "##drawplots", m_vd.ppszPlotViz[m_vd.drawPlots ]) )
+        {
+			if ( ImGui::Selectable( m_vd.ppszPlotViz[ m_vd.Disable ] ) ) m_vd.drawPlots = m_vd.Disable;
+			if ( ImGui::Selectable( m_vd.ppszPlotViz[ m_vd.Top ] ) ) m_vd.drawPlots = m_vd.Top;
+			if ( ImGui::Selectable( m_vd.ppszPlotViz[ m_vd.Bottom ] ) ) m_vd.drawPlots = m_vd.Bottom;
+            ImGui::EndCombo();
+        }
+
+
         const auto expand = ImGui::TreeNode( "Plots" );
         ImGui::SameLine();
         ImGui::TextDisabled( "(%zu)", m_worker.GetPlots().size() );

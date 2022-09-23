@@ -37,6 +37,8 @@ struct RangeSlim
 struct ViewData
 {
     enum EPlotViz { Disable = 0, Top, Bottom };
+    const char *const ppszPlotViz[ 3 ]{ "Disable Plots", "Plots Above Zones", "Plots Below Zone" };
+
 
     int64_t zvStart = 0;
     int64_t zvEnd = 0;
@@ -63,6 +65,7 @@ struct ViewData
     float    flFrameHeightScale = 1.0f;
     int32_t frameOverviewMaxTimeMS = 50;
     int32_t plotsMaxTimeMS = 50;
+
 };
 
 struct Annotation
