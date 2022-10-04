@@ -1,6 +1,11 @@
 #include "imgui/imgui_impl_glfw.h"
 #include "imgui/imgui_impl_opengl3.h"
-#include "imgui/imgui_impl_opengl3_loader.h"
+#ifdef __EMSCRIPTEN__
+#  include <GLES2/gl2.h>
+#  include <emscripten/html5.h>
+#else
+#  include "imgui/imgui_impl_opengl3_loader.h"
+#endif
 
 #include <chrono>
 #include <GLFW/glfw3.h>
@@ -16,6 +21,7 @@ static GLFWwindow* s_window;
 static std::function<void()> s_redraw;
 static RunQueue* s_mainThreadTasks;
 static WindowPosition* s_winPos;
+static bool s_iconified;
 
 static void glfw_error_callback( int error, const char* description )
 {
@@ -45,6 +51,11 @@ static void glfw_window_maximize_callback( GLFWwindow*, int maximized )
     s_winPos->maximize = maximized;
 }
 
+static void glfw_window_iconify_callback( GLFWwindow*, int iconified )
+{
+    s_iconified = iconified != 0;
+}
+
 
 Backend::Backend( const char* title, std::function<void()> redraw, RunQueue* mainThreadTasks )
 {
@@ -65,7 +76,7 @@ Backend::Backend( const char* title, std::function<void()> redraw, RunQueue* mai
     if( !s_window ) exit( 1 );
 
     glfwSetWindowPos( s_window, m_winPos.x, m_winPos.y );
-#ifdef GLFW_MAXIMIZED
+#if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 2 )
     if( m_winPos.maximize ) glfwMaximizeWindow( s_window );
 #endif
 
@@ -74,15 +85,23 @@ Backend::Backend( const char* title, std::function<void()> redraw, RunQueue* mai
     glfwSetWindowRefreshCallback( s_window, []( GLFWwindow* ) { s_redraw(); } );
 
     ImGui_ImplGlfw_InitForOpenGL( s_window, true );
+#ifdef __EMSCRIPTEN__
+    ImGui_ImplOpenGL3_Init( "#version 100" );
+#else
     ImGui_ImplOpenGL3_Init( "#version 150" );
+#endif
 
     s_redraw = redraw;
     s_mainThreadTasks = mainThreadTasks;
     s_winPos = &m_winPos;
+    s_iconified = false;
 
     glfwSetWindowPosCallback( s_window, glfw_window_pos_callback );
     glfwSetWindowSizeCallback( s_window, glfw_window_size_callback );
+#if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
     glfwSetWindowMaximizeCallback( s_window, glfw_window_maximize_callback );
+#endif
+    glfwSetWindowIconifyCallback( s_window, glfw_window_iconify_callback );
 }
 
 Backend::~Backend()
@@ -102,21 +121,31 @@ void Backend::Show()
 
 void Backend::Run()
 {
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop( []() {
+        glfwPollEvents();
+        s_redraw();
+        s_mainThreadTasks->Run();
+    }, 0, 1 );
+#else
     while( !glfwWindowShouldClose( s_window ) )
     {
-        glfwPollEvents();
-        if( glfwGetWindowAttrib( s_window, GLFW_ICONIFIED ) )
+        if( s_iconified )
         {
-            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
-            continue;
+            glfwWaitEvents();
         }
-        s_redraw();
-        if( !glfwGetWindowAttrib( s_window, GLFW_FOCUSED ) )
+        else
         {
-            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+            glfwPollEvents();
+            s_redraw();
+            if( !glfwGetWindowAttrib( s_window, GLFW_FOCUSED ) )
+            {
+                std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+            }
+            s_mainThreadTasks->Run();
         }
-        s_mainThreadTasks->Run();
     }
+#endif
 }
 
 void Backend::NewFrame( int& w, int& h )
@@ -139,17 +168,6 @@ void Backend::EndFrame()
     glClear( GL_COLOR_BUFFER_BIT );
     ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );
 
-    // Update and Render additional Platform Windows
-    // (Platform functions may change the current OpenGL context, so we save/restore it to make it easier to paste this code elsewhere.
-    //  For this specific demo app we could also call glfwMakeContextCurrent(window) directly)
-    if( ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable )
-    {
-        GLFWwindow* backup_current_context = glfwGetCurrentContext();
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
-        glfwMakeContextCurrent( backup_current_context );
-    }
-
     glfwSwapBuffers( s_window );
 }
 
@@ -169,7 +187,9 @@ void Backend::SetTitle( const char* title )
 
 float Backend::GetDpiScale()
 {
-#if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
+#ifdef __EMSCRIPTEN__
+    return EM_ASM_DOUBLE( { return window.devicePixelRatio; } );
+#elif GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
     auto monitor = glfwGetWindowMonitor( s_window );
     if( !monitor ) monitor = glfwGetPrimaryMonitor();
     if( monitor )
@@ -181,3 +201,11 @@ float Backend::GetDpiScale()
 #endif
     return 1;
 }
+
+#ifdef __EMSCRIPTEN__
+extern "C" int nativeResize( int width, int height )
+{
+    glfwSetWindowSize( s_window, width, height );
+    return 0;
+}
+#endif

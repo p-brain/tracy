@@ -34,6 +34,7 @@ struct MicroArchUx
 };
 
 static constexpr MicroArchUx s_uArchUx[] = {
+    { "AMD Zen 4", "Ryzen 9 7950X", "ZEN4" },
     { "AMD Zen 3", "Ryzen 5 5600X", "ZEN3" },
     { "AMD Zen 2", "Ryzen 7 3700X", "ZEN2" },
     { "AMD Zen+", "Ryzen 5 2600", "ZEN+" },
@@ -488,6 +489,7 @@ static constexpr CpuIdMap s_cpuIdMap[] = {
     { PackCpuInfo( 0xA40F00 ), "ZEN3" },
     { PackCpuInfo( 0xA40F41 ), "ZEN3" },
     { PackCpuInfo( 0xA50F00 ), "ZEN3" },
+    { PackCpuInfo( 0xA60F12 ), "ZEN4" },
     { PackCpuInfo( 0x090672 ), "ADL-P" },
     { PackCpuInfo( 0x090675 ), "ADL-P" },
     { PackCpuInfo( 0x0906A2 ), "ADL-P" },
@@ -946,7 +948,7 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
             m_maxLine = strlen( tmp ) + 1;
         }
         cs_free( insn, cnt );
-        m_maxMnemonicLen = mLenMax + 2;
+        m_maxMnemonicLen = mLenMax + 1;
         m_maxAsmBytes = bytesMax;
         if( !m_jumpTable.empty() )
         {
@@ -2401,10 +2403,14 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
     SetFont();
 
     int maxAddrLen;
+    int maxAddrLenRel;
     {
-        char tmp[32];
+        char tmp[32], tmp2[32];
         sprintf( tmp, "%" PRIx64, m_baseAddr + m_codeLen );
         maxAddrLen = strlen( tmp );
+        sprintf( tmp, "%zu", m_asm.size() );
+        sprintf( tmp2, "+%" PRIu32, m_codeLen );
+        maxAddrLenRel = std::max( strlen( tmp ) + 3, strlen( tmp2 ) );      // +3: [-123]
     }
 
     uint64_t selJumpStart = 0;
@@ -2422,7 +2428,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                 m_targetAddr = 0;
                 ImGui::SetScrollHereY();
             }
-            RenderAsmLine( line, zero.ipMaxAsm, as, worker, jumpOut, maxAddrLen, view );
+            RenderAsmLine( line, zero.ipMaxAsm, as, worker, jumpOut, maxAddrLen, maxAddrLenRel, view );
         }
         const auto win = ImGui::GetCurrentWindowRead();
         m_asmWidth = win->DC.CursorMaxPos.x - win->DC.CursorStartPos.x;
@@ -2442,7 +2448,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
             {
                 for( auto i=clipper.DisplayStart; i<clipper.DisplayEnd; i++ )
                 {
-                    RenderAsmLine( m_asm[i], zero.ipMaxAsm, zero, worker, jumpOut, maxAddrLen, view );
+                    RenderAsmLine( m_asm[i], zero.ipMaxAsm, zero, worker, jumpOut, maxAddrLen, maxAddrLenRel, view );
                     insList.emplace_back( m_asm[i].addr );
                     const auto win = ImGui::GetCurrentWindowRead();
                     const auto lineWidth = win->DC.CursorMaxPos.x - win->DC.CursorStartPos.x;
@@ -2456,7 +2462,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                     auto& line = m_asm[i];
                     auto it = as.ipCountAsm.find( line.addr );
                     const auto ipcnt = it == as.ipCountAsm.end() ? zero.ipMaxAsm : it->second;
-                    RenderAsmLine( line, ipcnt, as, worker, jumpOut, maxAddrLen, view );
+                    RenderAsmLine( line, ipcnt, as, worker, jumpOut, maxAddrLen, maxAddrLenRel, view );
                     insList.emplace_back( line.addr );
                     const auto win = ImGui::GetCurrentWindowRead();
                     const auto lineWidth = win->DC.CursorMaxPos.x - win->DC.CursorStartPos.x;
@@ -3248,7 +3254,7 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
         const auto itemsWidth = ( endPos - startPos ).x;
         const auto fixedWidth = 17 * ts.x;
         ImGui::ItemSize( ImVec2( fixedWidth - itemsWidth, 0 ) );
-        ImGui::SameLine( 0, ty );
+        ImGui::SameLine( 0, 0 );
     }
 
     const auto lineCount = m_source.get().size();
@@ -3345,7 +3351,7 @@ static tracy_force_inline uint32_t AsmColor( uint32_t base, bool inContext, int 
     }
 }
 
-void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const AddrStatData& as, Worker& worker, uint64_t& jumpOut, int maxAddrLen, View& view )
+void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const AddrStatData& as, Worker& worker, uint64_t& jumpOut, int maxAddrLen, int maxAddrLenRel, View& view )
 {
     const auto scale = GetScale();
     const auto ty = ImGui::GetTextLineHeight();
@@ -3585,7 +3591,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         const auto itemsWidth = ( endPos - startPos ).x;
         const auto fixedWidth = 17 * ts.x;
         ImGui::ItemSize( ImVec2( fixedWidth - itemsWidth, 0 ) );
-        ImGui::SameLine( 0, ty );
+        ImGui::SameLine( 0, 0 );
     }
 
     char buf[256];
@@ -3602,8 +3608,16 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         sprintf( buf, "%" PRIx64, line.addr );
     }
     const auto asz = strlen( buf );
-    memset( buf+asz, ' ', maxAddrLen-asz );
-    buf[maxAddrLen] = '\0';
+    if( m_asmRelative )
+    {
+        memset( buf+asz, ' ', maxAddrLenRel-asz );
+        buf[maxAddrLenRel] = '\0';
+    }
+    else
+    {
+        memset( buf+asz, ' ', maxAddrLen-asz );
+        buf[maxAddrLen] = '\0';
+    }
     if( m_asmCountBase >= 0 )
     {
         TextColoredUnformatted( asmIdx - m_asmCountBase < 0 ? 0xFFBB6666 : 0xFF66BBBB, buf );
@@ -3654,7 +3668,8 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
     bool lineHovered = false;
     if( m_asmShowSourceLocation && !m_sourceFiles.empty() )
     {
-        ImGui::SameLine();
+        constexpr size_t MaxSourceLength = 26;
+        ImGui::SameLine( 0, stw );
         ImVec2 startPos;
         uint32_t srcline;
         const auto srcidx = worker.GetLocationForAddress( line.addr, srcline );
@@ -3669,13 +3684,13 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
             startPos = ImGui::GetCursorScreenPos();
             char buf[64];
             const auto fnsz = strlen( fileName );
-            if( fnsz < 30 - m_maxLine )
+            if( fnsz < MaxSourceLength - m_maxLine )
             {
                 sprintf( buf, "%s:%i", fileName, srcline );
             }
             else
             {
-                sprintf( buf, "...%s:%i", fileName+fnsz-(30-3-1-m_maxLine), srcline );
+                sprintf( buf, "\xe2\x80\xa6%s:%i", fileName+fnsz-(MaxSourceLength-1-1-m_maxLine), srcline );
             }
             TextDisabledUnformatted( buf );
             if( ImGui::IsItemHovered() )
@@ -3760,7 +3775,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
         ImGui::SameLine( 0, 0 );
         const auto endPos = ImGui::GetCursorScreenPos();
         const auto itemsWidth = ( endPos - startPos ).x;
-        const auto fixedWidth = 32 * ts.x;
+        const auto fixedWidth = ( MaxSourceLength + 2 ) * ts.x;
         ImGui::ItemSize( ImVec2( fixedWidth - itemsWidth, 0 ) );
 
     }
@@ -3768,7 +3783,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
     {
         auto code = (const uint8_t*)worker.GetSymbolCode( m_baseAddr, m_codeLen );
         assert( code );
-        ImGui::SameLine();
+        ImGui::SameLine( 0, stw );
         const auto len = PrintHexBytes( code + line.addr - m_baseAddr, line.len, worker.GetCpuArch() );
         ImGui::SameLine( 0, 0 );
         ImGui::ItemSize( ImVec2( stw * ( m_maxAsmBytes*2 - len ), ty ), 0 );
@@ -4414,14 +4429,13 @@ void SourceView::RenderHwLinePart( size_t cycles, size_t retired, size_t branchR
         uint32_t col = unreliable ? 0x44FFFFFF : GetGoodnessColor( ipc * 0.25f );
         if( ipc >= 10 )
         {
-            TextColoredUnformatted( col, "  10+ " );
+            TextColoredUnformatted( col, " 10+ " );
         }
         else
         {
             char buf[16];
-            *buf = ' ';
-            const auto end = PrintFloat( buf+1, buf+16, ipc, 2 );
-            assert( end == buf + 5 );
+            const auto end = PrintFloat( buf, buf+16, ipc, 2 );
+            assert( end == buf + 4 );
             memcpy( end, " ", 2 );
             TextColoredUnformatted( col, buf );
         }
@@ -4442,7 +4456,7 @@ void SourceView::RenderHwLinePart( size_t cycles, size_t retired, size_t branchR
     }
     else
     {
-        ImGui::ItemSize( ImVec2( 6 * ts.x, ts.y ) );
+        ImGui::ItemSize( ImVec2( 5 * ts.x, ts.y ) );
     }
     ImGui::SameLine( 0, 0 );
     if( m_hwSamplesRelative )

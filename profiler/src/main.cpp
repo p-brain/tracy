@@ -172,6 +172,9 @@ int main( int argc, char** argv )
     sprintf( title, "Tracy Profiler %i.%i.%i", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch );
 
     std::unique_ptr<tracy::FileRead> initFileOpen;
+#ifdef __EMSCRIPTEN__
+    initFileOpen = std::unique_ptr<tracy::FileRead>( tracy::FileRead::Open( "embed.tracy" ) );
+#endif
     if( argc == 2 )
     {
         if( strcmp( argv[1], "--help" ) == 0 )
@@ -256,7 +259,7 @@ int main( int argc, char** argv )
                 {
                     uint32_t ver;
                     memcpy( &ver, data, 4 );
-                    RunOnMainThread( [ver] { updateVersion = ver; } );
+                RunOnMainThread( [ver] { updateVersion = ver; tracy::s_wasActive = true; } );
                 }
                 delete[] data;
             } );
@@ -361,21 +364,8 @@ static void DrawContents()
     static uint16_t reconnectPort;
     static bool showFilter = false;
 
-    int display_w, display_h;
-    bptr->NewFrame( display_w, display_h );
-    ImGui::NewFrame();
-    tracy::MouseFrame();
-
-    setlocale( LC_NUMERIC, "C" );
-
     if( !view )
     {
-        if( s_customTitle )
-        {
-            s_customTitle = false;
-            bptr->SetTitle( title );
-        }
-
         const auto time = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::system_clock::now().time_since_epoch() ).count();
         if( !broadcastListen )
         {
@@ -456,6 +446,62 @@ static void DrawContents()
                 }
             }
         }
+    }
+    else if( !clients.empty() )
+    {
+        clients.clear();
+    }
+
+    int display_w, display_h;
+    bptr->NewFrame( display_w, display_h );
+
+    static int activeFrames = 3;
+    if( tracy::WasActive() || !clients.empty() || ( view && view->WasActive() ) )
+    {
+        activeFrames = 3;
+    }
+    else
+    {
+        auto ctx = ImGui::GetCurrentContext();
+        if( ctx->NavWindowingTarget || ( ctx->DimBgRatio != 0 && ctx->DimBgRatio != 1 ) )
+        {
+            activeFrames = 3;
+        }
+        else
+        {
+            auto& inputQueue = ctx->InputEventsQueue;
+            if( !inputQueue.empty() )
+            {
+                for( auto& v : inputQueue )
+                {
+                    if( v.Type != ImGuiInputEventType_MouseViewport )
+                    {
+                        activeFrames = 3;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if( activeFrames == 0 )
+    {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 16 ) );
+        return;
+    }
+    activeFrames--;
+
+    ImGui::NewFrame();
+    tracy::MouseFrame();
+
+    setlocale( LC_NUMERIC, "C" );
+
+    if( !view )
+    {
+        if( s_customTitle )
+        {
+            s_customTitle = false;
+            bptr->SetTitle( title );
+        }
 
         auto& style = ImGui::GetStyle();
         style.Colors[ImGuiCol_WindowBg] = ImVec4( 0.129f, 0.137f, 0.11f, 1.f );
@@ -486,9 +532,17 @@ static void DrawContents()
             tracy::TextDisabledUnformatted( "<wolf@nereid.pl>" );
             tracy::TextDisabledUnformatted( "Additional authors listed in AUTHORS file and in git history." );
             ImGui::Separator();
+            ImGui::PushFont( s_smallFont );
             tracy::TextFocused( "Protocol version", tracy::RealToString( tracy::ProtocolVersion ) );
+            ImGui::SameLine();
+            ImGui::SeparatorEx( ImGuiSeparatorFlags_Vertical );
+            ImGui::SameLine();
             tracy::TextFocused( "Broadcast version", tracy::RealToString( tracy::BroadcastVersion ) );
+            ImGui::SameLine();
+            ImGui::SeparatorEx( ImGuiSeparatorFlags_Vertical );
+            ImGui::SameLine();
             tracy::TextFocused( "Build date", __DATE__ ", " __TIME__ );
+            ImGui::PopFont();
             ImGui::EndPopup();
         }
         ImGui::Spacing();
@@ -562,7 +616,7 @@ static void DrawContents()
                         HttpRequest( "nereid.pl", "/tracy/notes", 8099, [] ( int size, char* data ) {
                             std::string notes( data, data+size );
                             delete[] data;
-                            RunOnMainThread( [notes = move( notes )] { releaseNotes = std::move( notes ); } );
+                            RunOnMainThread( [notes = std::move( notes )] { releaseNotes = std::move( notes ); tracy::s_wasActive = true; } );
                         } );
                     } );
                 }
@@ -706,9 +760,10 @@ static void DrawContents()
                 ImGui::SetColumnWidth( 1, w * 0.175f );
                 ImGui::SetColumnWidth( 2, w * 0.425f );
             }
-            std::lock_guard<std::mutex> lock( resolvLock );
+            const auto time = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::system_clock::now().time_since_epoch() ).count();
             int idx = 0;
             int passed = 0;
+            std::lock_guard<std::mutex> lock( resolvLock );
             for( auto& v : clients )
             {
                 const bool badProto = v.second.protocolVersion != tracy::ProtocolVersion;

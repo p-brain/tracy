@@ -109,6 +109,7 @@ public:
     ~View();
 
     static bool Draw();
+    bool WasActive() const;
 
     void NotifyRootWindowSize( float w, float h ) { m_rootWidth = w; m_rootHeight = h; }
     void ViewSource( const char* fileName, int line );
@@ -567,6 +568,7 @@ private:
     std::vector<std::unique_ptr<Annotation>> m_annotations;
     UserData m_userData;
 
+    bool m_wasActive = false;
     bool m_reconnectRequested = false;
     bool m_firstFrame = true;
     std::chrono::time_point<std::chrono::high_resolution_clock> m_firstFrameTime;

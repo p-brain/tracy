@@ -384,7 +384,6 @@ bool View::Draw()
 
                     auto& cs = s_instance->m_worker.GetCallstack( data.callstack );
                     int fidx = 0;
-                    int bidx = 0;
                     for( auto& entry : cs )
                     {
                         auto frameData = s_instance->m_worker.GetCallstackFrame( entry );
@@ -431,8 +430,6 @@ bool View::Draw()
                                     while( *++test );
                                     if( match ) continue;
                                 }
-
-                                bidx++;
 
                                 ImGui::TableNextRow();
                                 ImGui::TableNextColumn();
@@ -629,6 +626,7 @@ bool View::DrawImpl()
     }
 
     const auto& io = ImGui::GetIO();
+    m_wasActive = false;
 
     assert( m_shortcut == ShortcutAction::None );
     if( io.KeyCtrl )
@@ -1069,14 +1067,14 @@ bool View::DrawImpl()
         }
     }
 
-    m_callstackBuzzAnim.Update( io.DeltaTime );
-    m_sampleParentBuzzAnim.Update( io.DeltaTime );
-    m_callstackTreeBuzzAnim.Update( io.DeltaTime );
-    m_zoneinfoBuzzAnim.Update( io.DeltaTime );
-    m_findZoneBuzzAnim.Update( io.DeltaTime );
-    m_optionsLockBuzzAnim.Update( io.DeltaTime );
-    m_lockInfoAnim.Update( io.DeltaTime );
-    m_statBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_callstackBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_sampleParentBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_callstackTreeBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_zoneinfoBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_findZoneBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_optionsLockBuzzAnim.Update( io.DeltaTime );
+    m_wasActive |= m_lockInfoAnim.Update( io.DeltaTime );
+    m_wasActive |= m_statBuzzAnim.Update( io.DeltaTime );
 
     if( m_firstFrame )
     {
@@ -1286,6 +1284,16 @@ void View::HighlightThread( uint64_t thread )
 {
     m_drawThreadMigrations = thread;
     m_drawThreadHighlight = thread;
+}
+
+bool View::WasActive() const
+{
+    return m_wasActive ||
+        m_zoomAnim.active ||
+        m_notificationTime > 0 ||
+        !m_playback.pause ||
+        m_worker.IsConnected() ||
+        !m_worker.IsBackgroundDone();
 }
 
 }
