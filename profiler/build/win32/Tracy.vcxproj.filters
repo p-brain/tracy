@@ -375,9 +375,12 @@
     <ClCompile Include="..\..\..\server\TracyTimelineItemCpuData.cpp">
       <Filter>server</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyFileselector.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\GetMainWindowHandle.cpp">
       <Filter>src</Filter>
-    </ClCompile>
+    </ClCompile>    
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\server\TracyEvent.hpp">
@@ -764,10 +767,12 @@
     <ClInclude Include="..\..\..\server\TracyTimelineItemCpuData.hpp">
       <Filter>server</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyFileselector.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\GetMainWindowHandle.h">
       <Filter>src</Filter>
     </ClInclude>
-
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />

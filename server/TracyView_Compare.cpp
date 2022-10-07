@@ -1,11 +1,8 @@
 #include <numeric>
 
-#ifndef TRACY_NO_FILESELECTOR
-#  include "../nfd/nfd.h"
-#endif
-
 #include "TracyImGui.hpp"
 #include "TracyFileRead.hpp"
+#include "TracyFileselector.hpp"
 #include "TracyPrint.hpp"
 #include "TracyView.hpp"
 
@@ -152,11 +149,7 @@ void View::DrawCompare()
         ImGui::TextWrapped( "Please load a second trace to compare results." );
         if( ImGui::Button( ICON_FA_FOLDER_OPEN " Open second trace" ) && !m_compare.loadThread.joinable() )
         {
-            nfdu8filteritem_t filter = { "Tracy Profiler trace file", "tracy" };
-            nfdu8char_t* fn;
-            auto res = NFD_OpenDialogU8( &fn, &filter, 1, nullptr );
-            if( res == NFD_OKAY )
-            {
+            Fileselector::OpenFile( "tracy", "Tracy Profiler trace file", [this]( const char* fn ) {
                 try
                 {
                     auto f = std::shared_ptr<tracy::FileRead>( tracy::FileRead::Open( fn ) );
@@ -173,7 +166,7 @@ void View::DrawCompare()
                                 m_compare.badVer.state = BadVersionState::UnsupportedVersion;
                                 m_compare.badVer.version = e.version;
                             }
-                            } );
+                        } );
                     }
                 }
                 catch( const tracy::NotTracyDump& )
@@ -184,8 +177,7 @@ void View::DrawCompare()
                 {
                     m_compare.badVer.state = BadVersionState::ReadError;
                 }
-                NFD_FreePathU8( fn );
-            }
+            } );
         }
         tracy::BadVersion( m_compare.badVer, m_bigFont );
         ImGui::End();

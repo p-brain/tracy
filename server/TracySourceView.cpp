@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "TracyCharUtil.hpp"
 #include "TracyColor.hpp"
+#include "TracyFileselector.hpp"
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
 #include "TracyMicroArchitecture.hpp"
@@ -18,10 +19,6 @@
 #include "TracyWorker.hpp"
 
 #include "IconsFontAwesome6.h"
-
-#ifndef TRACY_NO_FILESELECTOR
-#  include "../nfd/nfd.h"
-#endif
 
 namespace tracy
 {
@@ -5359,11 +5356,7 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
     assert( start < m_asm.size() );
     assert( start < stop );
 
-    nfdu8filteritem_t filter = { "Assembly file", "asm" };
-    nfdu8char_t* fn;
-    auto res = NFD_SaveDialogU8( &fn, &filter, 1, nullptr, nullptr );
-    if( res == NFD_OKAY )
-    {
+    Fileselector::SaveFile( "asm", "Assembly file", [this, &worker, start, stop]( const char* fn ) {
         FILE* f = nullptr;
         const auto sz = strlen( fn );
         if( sz < 5 || memcmp( fn + sz - 4, ".asm", 4 ) != 0 )
@@ -5376,67 +5369,64 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
         {
             f = fopen( fn, "wb" );
         }
-        if( f )
+        if( !f ) return;
+        char tmp[16];
+        auto sym = worker.GetSymbolData( m_symAddr );
+        assert( sym );
+        const char* symName;
+        if( sym->isInline )
         {
-            char tmp[16];
-            auto sym = worker.GetSymbolData( m_symAddr );
-            assert( sym );
-            const char* symName;
-            if( sym->isInline )
+            auto parent = worker.GetSymbolData( m_baseAddr );
+            if( parent )
             {
-                auto parent = worker.GetSymbolData( m_baseAddr );
-                if( parent )
-                {
-                    symName = worker.GetString( parent->name );
-                }
-                else
-                {
-                    sprintf( tmp, "0x%" PRIx64, m_baseAddr );
-                    symName = tmp;
-                }
+                symName = worker.GetString( parent->name );
             }
             else
             {
-                symName = worker.GetString( sym->name );
+                sprintf( tmp, "0x%" PRIx64, m_baseAddr );
+                symName = tmp;
             }
-            fprintf( f, "; Tracy Profiler disassembly of symbol %s [%s]\n\n", symName, worker.GetCaptureProgram().c_str() );
-            if( !m_atnt ) fprintf( f, ".intel_syntax\n\n" );
-
-            const auto end = m_asm.size() < stop ? m_asm.size() : stop;
-            for( size_t i=start; i<end; i++ )
-            {
-                const auto& v = m_asm[i];
-                auto it = m_locMap.find( v.addr );
-                if( it != m_locMap.end() )
-                {
-                    fprintf( f, ".L%" PRIu32 ":\n", it->second );
-                }
-                bool hasJump = false;
-                if( v.jumpAddr != 0 )
-                {
-                    auto lit = m_locMap.find( v.jumpAddr );
-                    if( lit != m_locMap.end() )
-                    {
-                        fprintf( f, "\t%-*s.L%" PRIu32 "\n", m_maxMnemonicLen, v.mnemonic.c_str(), lit->second );
-                        hasJump = true;
-                    }
-                }
-                if( !hasJump )
-                {
-                    if( v.operands.empty() )
-                    {
-                        fprintf( f, "\t%s\n", v.mnemonic.c_str() );
-                    }
-                    else
-                    {
-                        fprintf( f, "\t%-*s%s\n", m_maxMnemonicLen, v.mnemonic.c_str(), v.operands.c_str() );
-                    }
-                }
-            }
-            fclose( f );
         }
-        NFD_FreePathU8( fn );
-    }
+        else
+        {
+            symName = worker.GetString( sym->name );
+        }
+        fprintf( f, "; Tracy Profiler disassembly of symbol %s [%s]\n\n", symName, worker.GetCaptureProgram().c_str() );
+        if( !m_atnt ) fprintf( f, ".intel_syntax\n\n" );
+
+        const auto end = m_asm.size() < stop ? m_asm.size() : stop;
+        for( size_t i=start; i<end; i++ )
+        {
+            const auto& v = m_asm[i];
+            auto it = m_locMap.find( v.addr );
+            if( it != m_locMap.end() )
+            {
+                fprintf( f, ".L%" PRIu32 ":\n", it->second );
+            }
+            bool hasJump = false;
+            if( v.jumpAddr != 0 )
+            {
+                auto lit = m_locMap.find( v.jumpAddr );
+                if( lit != m_locMap.end() )
+                {
+                    fprintf( f, "\t%-*s.L%" PRIu32 "\n", m_maxMnemonicLen, v.mnemonic.c_str(), lit->second );
+                    hasJump = true;
+                }
+            }
+            if( !hasJump )
+            {
+                if( v.operands.empty() )
+                {
+                    fprintf( f, "\t%s\n", v.mnemonic.c_str() );
+                }
+                else
+                {
+                    fprintf( f, "\t%-*s%s\n", m_maxMnemonicLen, v.mnemonic.c_str(), v.operands.c_str() );
+                }
+            }
+        }
+        fclose( f );
+    } );
 }
 #endif
 
