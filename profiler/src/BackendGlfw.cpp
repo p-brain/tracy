@@ -85,7 +85,7 @@ Backend::Backend( const char* title, std::function<void()> redraw, RunQueue* mai
 
     glfwMakeContextCurrent( s_window );
     glfwSwapInterval( 1 ); // Enable vsync
-    glfwSetWindowRefreshCallback( s_window, []( GLFWwindow* ) { s_redraw(); } );
+    glfwSetWindowRefreshCallback( s_window, []( GLFWwindow* ) { tracy::s_wasActive = true; s_redraw(); } );
 
     ImGui_ImplGlfw_InitForOpenGL( s_window, true );
 #ifdef __EMSCRIPTEN__
@@ -147,6 +147,16 @@ void Backend::Run()
             }
             s_mainThreadTasks->Run();
         }
+    }
+#endif
+}
+
+void Backend::Attention()
+{
+#if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
+    if( !glfwGetWindowAttrib( s_window, GLFW_FOCUSED ) )
+    {
+        glfwRequestWindowAttention( s_window );
     }
 #endif
 }

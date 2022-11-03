@@ -167,16 +167,17 @@ class Profiler
     {
         CallstackFrame,
         SymbolQuery,
-        CodeLocation,
         ExternalName,
-        KernelCode
+        KernelCode,
+        SourceCode
     };
 
     struct SymbolQueueItem
     {
         SymbolQueueItemType type;
         uint64_t ptr;
-        uint32_t extra;
+        uint64_t extra;
+        uint32_t id;
     };
 
 public:
@@ -814,18 +815,17 @@ private:
 
     void QueueCallstackFrame( uint64_t ptr );
     void QueueSymbolQuery( uint64_t symbol );
-    void QueueCodeLocation( uint64_t ptr );
     void QueueExternalName( uint64_t ptr );
     void QueueKernelCode( uint64_t symbol, uint32_t size );
+    void QueueSourceCodeQuery( uint32_t id );
 
     bool HandleServerQuery();
     void HandleDisconnect();
     void HandleParameter( uint64_t payload );
     void HandleSymbolCodeQuery( uint64_t symbol, uint32_t size );
-    void HandleSourceCodeQuery();
+    void HandleSourceCodeQuery( char* data, char* image, uint32_t id );
 
     void AckServerQuery();
-    void AckSourceCodeNotAvailable();
     void AckSymbolCodeNotAvailable();
 
     void CalibrateTimer();

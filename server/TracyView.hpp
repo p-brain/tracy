@@ -102,13 +102,13 @@ public:
 
     using SetTitleCallback = void(*)( const char* );
     using SetScaleCallback = void(*)( float, ImFont*&, ImFont*&, ImFont*& );
+    using AttentionCallback = void(*)();
 
-    View( void(*cbMainThread)(std::function<void()>, bool), ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, SetScaleCallback sscb = nullptr ) : View( cbMainThread, "127.0.0.1", 8086, fixedWidth, smallFont, bigFont, stcb, sscb ) {}
-    View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, uint16_t port, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, SetScaleCallback sscb = nullptr );
-    View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFont* fixedWidth = nullptr, ImFont* smallFont = nullptr, ImFont* bigFont = nullptr, SetTitleCallback stcb = nullptr, SetScaleCallback sscb = nullptr );
+    View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb );
+    View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb );
     ~View();
 
-    static bool Draw();
+    bool Draw();
     bool WasActive() const;
 
     void NotifyRootWindowSize( float w, float h ) { m_rootWidth = w; m_rootHeight = h; }
@@ -184,7 +184,7 @@ private:
             Out
         };
 
-        constexpr static auto DirectionToKeyMap = std::array<int, 4> { ImGuiKey_A, ImGuiKey_D, ImGuiKey_W, ImGuiKey_S };
+        constexpr static auto DirectionToKeyMap = std::array<ImGuiKey, 4> { ImGuiKey_A, ImGuiKey_D, ImGuiKey_W, ImGuiKey_S };
         constexpr static auto StartRangeMod = std::array<int, 4> { -1, 1, 1, -1 };
         constexpr static auto EndRangeMod = std::array<int, 4> { -1, 1, -1, 1 };
 
@@ -290,6 +290,7 @@ private:
 
     void HandleRange( Range& range, int64_t timespan, const ImVec2& wpos, float w );
     void HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w, double& pxns );
+    void HandleTimelineKeyboard( int64_t timespan, const ImVec2& wpos, float w );
 
     void AddAnnotation( int64_t start, int64_t end );
 
@@ -361,6 +362,8 @@ private:
 
     void SetPlaybackFrame( uint32_t idx );
     bool Save( const char* fn, FileWrite::Compression comp, int zlevel, bool buildDict );
+
+    void Attention( bool& alreadyDone );
 
     unordered_flat_map<uint64_t, bool> m_visibleMsgThread;
     unordered_flat_map<uint64_t, bool> m_waitStackThread;
@@ -531,6 +534,7 @@ private:
     SetTitleCallback m_stcb;
     bool m_titleSet = false;
     SetScaleCallback m_sscb;
+    AttentionCallback m_acb;
 
     float m_notificationTime = 0;
     std::string m_notificationText;
@@ -844,6 +848,13 @@ private:
     } m_sendQueueWarning;
 
     std::vector<std::pair<int, int>> m_cpuUsageBuf;
+
+    bool m_attnProtoMismatch = false;
+    bool m_attnNotAvailable = false;
+    bool m_attnDropped = false;
+    bool m_attnFailure = false;
+    bool m_attnWorking = false;
+    bool m_attnDisconnected = false;
 };
 
 }

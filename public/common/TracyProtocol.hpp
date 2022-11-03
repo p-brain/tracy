@@ -9,8 +9,8 @@ namespace tracy
 
 constexpr unsigned Lz4CompressBound( unsigned isize ) { return isize + ( isize / 255 ) + 16; }
 
-enum : uint32_t { ProtocolVersion = 60 };
-enum : uint16_t { BroadcastVersion = 2 };
+enum : uint32_t { ProtocolVersion = 63 };
+enum : uint16_t { BroadcastVersion = 3 };
 
 using lz4sz_t = uint32_t;
 
@@ -53,7 +53,6 @@ enum ServerQuery : uint8_t
     ServerQueryExternalName,
     ServerQuerySymbol,
     ServerQuerySymbolCode,
-    ServerQueryCodeLocation,
     ServerQuerySourceCode,
     ServerQueryDataTransfer,
     ServerQueryDataTransferPart
@@ -127,11 +126,41 @@ struct BroadcastMessage
     uint16_t broadcastVersion;
     uint16_t listenPort;
     uint32_t protocolVersion;
+    uint64_t pid;
     int32_t activeTime;        // in seconds
     char programName[WelcomeMessageProgramNameSize];
 };
 
+struct BroadcastMessage_v2
+{
+    uint16_t broadcastVersion;
+    uint16_t listenPort;
+    uint32_t protocolVersion;
+    int32_t activeTime;
+    char programName[WelcomeMessageProgramNameSize];
+};
+
+struct BroadcastMessage_v1
+{
+    uint32_t broadcastVersion;
+    uint32_t protocolVersion;
+    uint32_t listenPort;
+    uint32_t activeTime;
+    char programName[WelcomeMessageProgramNameSize];
+};
+
+struct BroadcastMessage_v0
+{
+    uint32_t broadcastVersion;
+    uint32_t protocolVersion;
+    uint32_t activeTime;
+    char programName[WelcomeMessageProgramNameSize];
+};
+
 enum { BroadcastMessageSize = sizeof( BroadcastMessage ) };
+enum { BroadcastMessageSize_v2 = sizeof( BroadcastMessage_v2 ) };
+enum { BroadcastMessageSize_v1 = sizeof( BroadcastMessage_v1 ) };
+enum { BroadcastMessageSize_v0 = sizeof( BroadcastMessage_v0 ) };
 
 #pragma pack( pop )
 

@@ -21,6 +21,7 @@ namespace tracy
 
 class View;
 class Worker;
+struct CallstackFrameData;
 
 class SourceView
 {
@@ -202,6 +203,9 @@ private:
     void CheckWrite( size_t line, RegsX86 reg, size_t limit );
 
     bool IsInContext( const Worker& worker, uint64_t addr ) const;
+    const std::vector<uint64_t>* GetAddressesForLocation( uint32_t fileStringIdx, uint32_t line, const Worker& worker );
+
+    tracy_force_inline float CalcJumpSeparation( float scale );
 
 #ifndef TRACY_NO_FILESELECTOR
     void Save( const Worker& worker, size_t start = 0, size_t stop = std::numeric_limits<size_t>::max() );
@@ -233,9 +237,11 @@ private:
     uint8_t m_maxAsmBytes;
     bool m_atnt;
     uint64_t m_jumpPopupAddr;
+    const CallstackFrameData* m_localCallstackPopup;
     bool m_hwSamples, m_hwSamplesRelative;
     bool m_childCalls;
     bool m_childCallList;
+    bool m_propagateInlines;
     CostType m_cost;
 
     SourceContents m_source;
@@ -248,6 +254,9 @@ private:
     size_t m_maxJumpLevel;
     bool m_showJumps;
 
+    unordered_flat_map<uint64_t, std::vector<uint64_t>> m_locationAddress;
+    bool m_locAddrIsProp;
+
     unordered_flat_map<uint32_t, uint32_t> m_sourceFiles;
     unordered_flat_set<uint64_t> m_selectedAddresses;
     unordered_flat_set<uint64_t> m_selectedAddressesHover;
@@ -259,7 +268,6 @@ private:
     CpuArchitecture m_cpuArch;
     int m_selMicroArch;
     int m_idxMicroArch, m_profileMicroArch;
-    bool m_showLatency;
 
     unordered_flat_set<uint32_t> m_asmSampleSelect;
     unordered_flat_set<uint32_t> m_srcSampleSelect;

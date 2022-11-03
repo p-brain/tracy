@@ -146,7 +146,7 @@ void View::DrawOptions()
                 }
                 if( !gpuData[i]->hasCalibration )
                 {
-                    ImGui::TreePush();
+                    ImGui::TreePush( (void*)nullptr );
                     auto& drift = GpuDrift( gpuData[i] );
                     ImGui::SetNextItemWidth( 120 * scale );
                     ImGui::PushID( i );

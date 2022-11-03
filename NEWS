@@ -5,6 +5,13 @@ here.
 v0.x.x (xxxx-xx-xx)
 -------------------
 
+- Support for pre-0.8 traces has been dropped.
+- Profiled programs will ignore dlclose() calls.
+
+
+v0.9.0 (2022-10-26)
+-------------------
+
 - Attention! All the header and source files used for integrating Tracy with
   applications were moved to the public/ directory. This will break your
   integration!
@@ -95,6 +102,29 @@ v0.x.x (xxxx-xx-xx)
 - The profiler UI will no longer unnecessarily redraw the screen if nothing
   was changed. This should have a profound impact on power usage.
 - Added microarchitecture data for Zen 4.
+- Implemented optional propagation of inline cost down the local call stack.
+  - This feature may be useful when trying to get a general outlook of the
+    cost at the top-level function in the symbol.
+  - It is possible to get nonsense data when this is enabled, for example
+    total cost exceeding 100%. This is by design.
+  - Assembly line costs are not affected.
+- Available clients now also broadcast their PID.
+- Reversed mouse button assignments for jumping to source / assembly line in
+  symbol view. The left mouse button will now focus the target line.
+- Assembly lines tooltip will now display local call stack of inline functions
+  (within the symbol).
+  - Right-clicking the source location entry in assembly line will show the
+    local call stack, along with source code preview of each entry and ability
+    to navigate to any selected inline function.
+- The profiler UI will now indicate that it needs attention if the window is
+  not focused and something interesting happens. For example when a connection
+  is established, or when a saved trace finishes loading, etc. How the
+  attention request is indicated depends on the operating system.
+- Clicking on the red microarchitecture icon in the symbol view assembly pane
+  will switch the selected microarchitecture to one the profiled application
+  was running on.
+- Removed option to display instruction latencies in a graphical form. Latency
+  data is still available in instruction tooltip.
 
 
 v0.8.2 (2022-06-28)

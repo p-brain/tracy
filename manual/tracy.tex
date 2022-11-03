@@ -3504,14 +3504,14 @@ Nevertheless, \textbf{the displayed source files might still not reflect the cod
 
 A much more capable symbol view mode is available if the inspected source location has an associated symbol context (i.e., if it comes from a call stack capture, from call stack sampling, etc.). A symbol is a unit of machine code, basically a callable function. It may be generated using multiple source files and may consist of numerous inlined functions. A list of all captured symbols is available in the statistics window, as described in chapter~\ref{statisticssampling}.
 
-The header of symbol view window contains a name of the selected \emph{\faPuzzlePiece{}~symbol}, a list of \emph{\faSitemap{}~functions} that contribute to the symbol, and information such as \emph{\faWeightHanging{}~Code size} in the program, or count of probed \emph{\faEyeDropper{}~Samples}.
+The header of symbol view window contains a name of the selected \emph{\faPuzzlePiece{}~symbol}, a list of \emph{\faSitemap{}~functions} that contribute to the symbol, and information such as count of probed \emph{\faEyeDropper{}~Samples}.
 
 Additionally, you may use the \emph{Mode} selector to decide what content should be displayed in the panels below:
 
 \begin{itemize}
 \item \emph{Source} -- only the source code will be displayed.
 \item \emph{Assembly} -- only the machine code disassembly will be shown.
-\item \emph{Combined} -- both source code and disassembly will be listed next to each other.
+\item \emph{Both} -- selects combined mode, in which source code and disassembly will be listed next to each other.
 \end{itemize}
 
 Some modes may be unavailable in some circumstances (missing or outdated source files, lack of machine code). In case the \emph{Assembly} mode is unavailable, this might be due to the \texttt{capstone} disassembly engine failing to disassemble the machine instructions. See section~\ref{buildingserver} for more information.
@@ -3520,17 +3520,29 @@ Some modes may be unavailable in some circumstances (missing or outdated source 
 
 This is pretty much the source file view window, but with the ability to select one of the source files that the compiler used to build the symbol. Additionally, each source file line that produced machine code in the symbol will show a count of associated assembly instructions, displayed with an '\texttt{@}' prefix, and will be marked with grey color on the scroll bar. Due to how optimizing compilers work, some lines may seemingly not produce any machine code, for example, because iterating a loop counter index might have been reduced to advancing a data pointer. Some other lines may have a disproportionate amount of associated instructions, e.g., when the compiler applied a loop unrolling optimization. This varies from case to case and from compiler to compiler.
 
+The \emph{Propagate inlines} option, available when sample data is present, will enable propagation of the instruction costs down the local call stack. For example, suppose a base function in the symbol issues a call to an inlined function (which may not be readily visible due to being contained in another source file). In that case, any cost attributed to the inlined function will be visible in the base function. Because the cost information is added to all the entries in the local call stacks, it is possible to see seemingly nonsense total cost values when this feature is enabled. To quickly toggle this on or off, you may also press the \keys{X} key.
+
 \paragraph{Assembly mode}
 
-This mode shows the disassembly of the symbol machine code. If only one inline function is selected through the \emph{\faSitemap{}~Function} selector, assembly instructions outside of this function will be dimmed out. Each assembly instruction is displayed listed with its location in the program memory during execution. If the \emph{\faSearchLocation{}~Relative locations} option is selected, the profiler will print an offset from the symbol beginning instead. Clicking the \LMB{}~left mouse button on the address/offset will switch to counting line numbers, using the selected one as the origin (i.e., zero value). Line numbers are displayed inside \texttt{[]} brackets. This display mode can be useful to correlate lines with the output of external tools, such as \texttt{llvm-mca}. To disable line numbering click the \RMB{}~right mouse button on a line number.
+This mode shows the disassembly of the symbol machine code. If only one inline function is selected through the \emph{\faSitemap{}~Function} selector, assembly instructions outside of this function will be dimmed out. Each assembly instruction is displayed listed with its location in the program memory during execution. If the \emph{\faSearchLocation{}~Relative address} option is selected, the profiler will print an offset from the symbol beginning instead. Clicking the \LMB{}~left mouse button on the address/offset will switch to counting line numbers, using the selected one as the origin (i.e., zero value). Line numbers are displayed inside \texttt{[]} brackets. This display mode can be useful to correlate lines with the output of external tools, such as \texttt{llvm-mca}. To disable line numbering click the \RMB{}~right mouse button on a line number.
 
-If the \emph{\faFileImport{}~Source locations} option is selected, each line of the assembly code will also contain information about the originating source file name and line number. Each file is assigned its own color for easier differentiation between different source files. Clicking the \LMB{}~left mouse button on a displayed source location will switch the source file, if necessary, and focus the source view on the selected line. Additionally, hovering the \faMousePointer{}~mouse cursor over the presented location will show a tooltip containing the name of a function the instruction originates from, along with an appropriate source code fragment.
+If the \emph{\faFileImport{}~Source locations} option is selected, each line of the assembly code will also contain information about the originating source file name and line number. Each file is assigned its own color for easier differentiation between different source files. Clicking the \LMB{}~left mouse button on a displayed source location will switch the source file, if necessary, and focus the source view on the selected line. Additionally, hovering the \faMousePointer{}~mouse cursor over the presented location will show a tooltip containing the name of a function the instruction originates from, along with an appropriate source code fragment and the local call stack if it exists.
 
-Selecting the \emph{\faCogs{}~Machine code} option will enable the display of raw machine code bytes for each line.
+\begin{bclogo}[
+noborder=true,
+couleur=black!5,
+logo=\bclampe
+]{Local call stack}
+In some cases, it may be challenging to understand what is being displayed in the disassembly. For example, calling the \texttt{std::lower\_bound} function may generate multiple levels of inlined functions: first, we enter the search algorithm, then the comparison functions, which in turn may be lambdas that call even more external code, and so on. In such an event, you will most likely see that some external code is taking a long time to execute, and you will be none the wiser on improving things.
+
+The local call stack for an assembly instruction represents all the inline function calls \emph{within the symbol} (hence the 'local' part), which were made to reach the instruction. Deeper inspection of the local call stack, including navigation to the source call site of each participating inline function, can be performed through the context menu accessible by pressing the \RMB{}~right mouse button on the source location.
+\end{bclogo}
+
+Selecting the \emph{\faCogs{}~Raw code} option will enable the display of raw machine code bytes for each line. Individual bytes are displayed with interwoven colors to make reading easier.
 
 If any instruction would jump to a predefined address, the symbolic name of the jump target will be additionally displayed. If the destination location is within the currently displayed symbol, an \texttt{->}~arrow will be prepended to the name. Hovering the \faMousePointer{}~mouse pointer over such symbol name will highlight the target location. Clicking on it with the \LMB{}~left mouse button will focus the view on the destination instruction or switch view to the destination symbol.
 
-Enabling the \emph{\faShare{}~Jumps} option will show jumps within the symbol code as a series of arrows from the jump source to the jump target and hovering the \faMousePointer{}~mouse pointer over a jump arrow will display a jump information tooltip. It will also draw the jump range on the scroll bar as a green line. A horizontal green line will mark the jump target location. Clicking on a jump arrow with the \LMB{}~left mouse button will focus the view on the target location. Jumps going out of the symbol\footnote{This includes jumps, procedure calls, and returns. For example, in x86 assembly the respective operand names can be: \texttt{jmp}, \texttt{call}, \texttt{ret}.} will be indicated by a smaller arrow pointing away from the code.
+Enabling the \emph{\faShare{}~Jumps} option will show jumps within the symbol code as a series of arrows from the jump source to the jump target, and hovering the \faMousePointer{}~mouse pointer over a jump arrow will display a jump information tooltip. It will also draw the jump range on the scroll bar as a green line. A horizontal green line will mark the jump target location. Clicking on a jump arrow with the \LMB{}~left mouse button will focus the view on the target location. The \RMB{}~right mouse button opens a jump context menu, which allows inspection and navigation to the target location or any of the source locations. Jumps going out of the symbol\footnote{This includes jumps, procedure calls, and returns. For example, in x86 assembly the respective operand names can be: \texttt{jmp}, \texttt{call}, \texttt{ret}.} will be indicated by a smaller arrow pointing away from the code.
 
 The \emph{AT\&T} switch can be used to select between \emph{Intel} and \emph{AT\&T} assembly syntax. Beware that microarchitecture data is only available if Intel syntax is selected.
 
@@ -3547,9 +3559,7 @@ If the listed assembly code targets x86 or x64 instruction set architectures, ho
 \item \emph{Ports} -- Which ports (execution units) are required for dispatch of microinstructions. For example, \texttt{2*p0+1*p015} would mean that out of the three microinstructions implementing the assembly instruction, two can only be executed on port 0, and one microinstruction can be executed on ports 0, 1, or 5. The number of available ports and their capabilities varies between different processors architectures. Refer to \url{https://wikichip.org/} for more information.
 \end{itemize}
 
-Selection of the CPU microarchitecture can be performed using the \emph{\faMicrochip{}~\textmu{}arch} drop-down. Each architecture is accompanied by the name of an example CPU implementing it. If the current selection matches the microarchitecture on which the profiled application was running on, the \faMicrochip{}~icon will be green\footnote{Comparing sampled instruction counts with microarchitectural details only makes sense when this selection is properly matched.}. Otherwise, it will be red\footnote{You can use this to gain insight into how the code \emph{may} behave on other processors.}.
-
-Enabling the \emph{\faTruckLoading{}~Latency} option will display a graphical representation of instruction latencies on the listing. The minimum latency of instruction is represented by a red bar, while the maximum latency is represented by a yellow bar.
+Selection of the CPU microarchitecture can be performed using the \emph{\faMicrochip{}~\textmu{}arch} drop-down. Each architecture is accompanied by the name of an example CPU implementing it. If the current selection matches the microarchitecture on which the profiled application was running, the \faMicrochip{}~icon will be green\footnote{Comparing sampled instruction counts with microarchitectural details only makes sense when this selection is properly matched.}. Otherwise, it will be red\footnote{You can use this to gain insight into how the code \emph{may} behave on other processors.}. Clicking on the \faMicrochip{}~icon when it is red will reset the selected microarchitecture to the one the profiled application was running on.
 
 Clicking on the \emph{\faFileImport{}~Save} button lets you write the disassembly listing to a file. You can then manually extract some critical loop kernel and pass it to a CPU simulator, such as \emph{LLVM Machine Code Analyzer} (\texttt{llvm-mca})\footnote{\url{https://llvm.org/docs/CommandGuide/llvm-mca.html}}, to see how the code is executed and if there are any pipeline bubbles. Consult the \texttt{llvm-mca} documentation for more details. Alternatively, you might click the \RMB{}~right mouse button on a jump arrow and save only the instructions within the jump range, using the \emph{\faFileImport{}~Save jump range} button.
 
@@ -3574,7 +3584,7 @@ For more straightforward navigation, dependencies are also marked on the left si
 
 \paragraph{Combined mode}
 
-In this mode, both the source and assembly panes will be displayed together, providing the best way to gain insight into the code. Hovering the \faMousePointer{}~mouse pointer over the source file line or the location of the assembly line will highlight the corresponding lines in the second pane (both in the listing and on the scroll bar). Clicking the \LMB{}~left mouse button on a line will select it in both panes. Note that while an assembly line always has only one corresponding source line, a single source line may have many associated assembly lines, not necessarily next to each other. Clicking the \RMB{}~right mouse button will perform the same action as the left mouse button, but it will also focus the secondary view on the selected line. Clicking on the same \emph{source} line more than once will focus the \emph{assembly} view on the next associated instructions block.
+In this mode, the source and assembly panes will be displayed together, providing the best way to gain insight into the code. Hovering the \faMousePointer{}~mouse pointer over the source file line or the location of the assembly line will highlight the corresponding lines in the second pane (both in the listing and on the scroll bar). Clicking the \LMB{}~left mouse button on a line will select it and focus on it in both panes. Note that while an assembly line always has only one corresponding source line, a single source line may have many associated assembly lines, not necessarily next to each other. Clicking on the same \emph{source} line more than once will focus the \emph{assembly} view on the next associated instructions block.
 
 \paragraph{Instruction pointer cost statistics}
 
@@ -3585,16 +3595,6 @@ By default, samples are displayed only within the selected symbol, in isolation.
 Instruction timings can be viewed as a group. To begin constructing such a group, click the \LMB{}~left mouse button on the percentage value. Additional instructions can be added using the \keys{\ctrl}~key while holding the \keys{\shift}~key will allow selection of a range. To cancel the selection, click the \RMB{}~right mouse button on a percentage value. Group statistics can be seen at the bottom of the pane.
 
 Clicking the \MMB{}~middle mouse button on the percentage value of an assembly instruction will display entry call stacks of the selected sample (see chapter~\ref{sampleparents}). This functionality is only available for instructions that have collected sampling data and only in the assembly view, as the source code may be inlined multiple times, which would result in ambiguous location data. Note that number of entry call stacks is displayed in a tooltip for a quick reference.
-
-\begin{bclogo}[
-noborder=true,
-couleur=black!5,
-logo=\bclampe
-]{How did I get here?}
-In some cases, it may be challenging to understand what is being displayed in the disassembly. For example, calling the \texttt{std::lower\_bound} function may generate multiple levels of inlined functions: first, we enter the search algorithm, then the comparison functions, which in turn may be lambdas that call even more external code, and so on. In such an event, you will most likely see that some external code is taking a long time to execute, and you will be none the wiser on improving things.
-
-Using the entry call stacks view can be very helpful in such cases, as you will be able to see the call stack of inline functions originating from a call site in the code you are familiar with. With this critical piece of information, you will be able to connect the functions you call and the executed instructions.
-\end{bclogo}
 
 The sample data source is controlled by the \emph{\faSitemap{}~Function} control in the window header. If this option should be disabled, sample data will represent the whole symbol. If it is enabled, then the sample data will only include the selected function. You can change the currently selected function by opening the drop-down box, which includes time statistics. The time percentage values of each contributing function are calculated relative to the total number of samples collected within the symbol.
 
@@ -3620,7 +3620,7 @@ As described in chapter~\ref{hardwaresampling}, on some platforms, Tracy can cap
 \item The rest of the available selections just show raw values gathered from the hardware counters. These are: \emph{Retirements}, \emph{Branches taken}, \emph{Branch miss}, \emph{Cache access} and \emph{Cache miss}.
 \end{itemize}
 
-If the \emph{\faHammer{}~Hardware samples} switch is enabled, the profiler will supplement the cost percentages column with three additional columns. The first added column displays the instructions per cycle (IPC) value. The two remaining columns show branch and cache data, as described below. The displayed values are color-coded, with green indicating good execution performance and red indicating that the code stalled the CPU pipeline for one reason or another.
+If the \emph{\faHammer{}~HW} (hardware samples) switch is enabled, the profiler will supplement the cost percentages column with three additional columns. The first added column displays the instructions per cycle (IPC) value. The two remaining columns show branch and cache data, as described below. The displayed values are color-coded, with green indicating good execution performance and red indicating that the code stalled the CPU pipeline for one reason or another.
 
 If the \emph{\faCarCrash{}~Impact} switch is enabled, the branch and cache columns will show how much impact the branch mispredictions and cache misses have. The way these statistics are calculated is described in the list above. In the other case, the columns will show the raw branch and cache miss rate ratios, isolated to their respective source and assembly lines and not relative to the whole symbol.
 

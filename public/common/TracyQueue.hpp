@@ -61,9 +61,9 @@ enum class QueueType : uint8_t
     GpuContextName,
     CallstackFrameSize,
     SymbolInformation,
-    CodeInformation,
     ExternalNameMetadata,
     SymbolCodeMetadata,
+    SourceCodeMetadata,
     FiberEnter,
     FiberLeave,
     Terminate,
@@ -547,19 +547,6 @@ struct QueueSymbolInformationFat : public QueueSymbolInformation
     uint8_t needFree;
 };
 
-struct QueueCodeInformation
-{
-    uint64_t symAddr;
-    uint32_t line;
-    uint64_t ptrOffset;
-};
-
-struct QueueCodeInformationFat : public QueueCodeInformation
-{
-    uint64_t fileString;
-    uint8_t needFree;
-};
-
 struct QueueCrashReport
 {
     int64_t time;
@@ -629,6 +616,11 @@ struct QueueParamSetup
     int32_t val;
 };
 
+struct QueueSourceCodeNotAvailable
+{
+    uint32_t id;
+};
+
 struct QueueCpuTopology
 {
     uint32_t package;
@@ -648,6 +640,13 @@ struct QueueSymbolCodeMetadata
     uint64_t symbol;
     uint64_t ptr;
     uint32_t size;
+};
+
+struct QueueSourceCodeMetadata
+{
+    uint64_t ptr;
+    uint32_t size;
+    uint32_t id;
 };
 
 struct QueueHeader
@@ -728,8 +727,6 @@ struct QueueItem
         QueueCallstackFrame callstackFrame;
         QueueSymbolInformation symbolInformation;
         QueueSymbolInformationFat symbolInformationFat;
-        QueueCodeInformation codeInformation;
-        QueueCodeInformationFat codeInformationFat;
         QueueCrashReport crashReport;
         QueueCrashReportThread crashReportThread;
         QueueSysTime sysTime;
@@ -742,6 +739,8 @@ struct QueueItem
         QueueCpuTopology cpuTopology;
         QueueExternalNameMetadata externalNameMetadata;
         QueueSymbolCodeMetadata symbolCodeMetadata;
+        QueueSourceCodeMetadata sourceCodeMetadata;
+        QueueSourceCodeNotAvailable sourceCodeNotAvailable;
         QueueFiberEnter fiberEnter;
         QueueFiberLeave fiberLeave;
     };
@@ -804,9 +803,9 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueGpuContextName ),
     sizeof( QueueHeader ) + sizeof( QueueCallstackFrameSize ),
     sizeof( QueueHeader ) + sizeof( QueueSymbolInformation ),
-    sizeof( QueueHeader ) + sizeof( QueueCodeInformation ),
     sizeof( QueueHeader ),                                  // ExternalNameMetadata - not for wire transfer
     sizeof( QueueHeader ),                                  // SymbolCodeMetadata - not for wire transfer
+    sizeof( QueueHeader ),                                  // SourceCodeMetadata - not for wire transfer
     sizeof( QueueHeader ) + sizeof( QueueFiberEnter ),
     sizeof( QueueHeader ) + sizeof( QueueFiberLeave ),
     // above items must be first
@@ -844,7 +843,7 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueuePlotConfig ),
     sizeof( QueueHeader ) + sizeof( QueueParamSetup ),
     sizeof( QueueHeader ),                                  // server query acknowledgement
-    sizeof( QueueHeader ),                                  // source code not available
+    sizeof( QueueHeader ) + sizeof( QueueSourceCodeNotAvailable ),
     sizeof( QueueHeader ),                                  // symbol code not available
     sizeof( QueueHeader ) + sizeof( QueueCpuTopology ),
     sizeof( QueueHeader ),                                  // single string data

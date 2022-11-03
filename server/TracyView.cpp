@@ -44,9 +44,7 @@ namespace tracy
 
 double s_time = 0;
 
-static View* s_instance = nullptr;
-
-View::View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb )
+View::View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb )
     : m_worker( addr, port )
     , m_staticView( false )
     , m_viewMode( ViewMode::LastFrames )
@@ -62,17 +60,15 @@ View::View( void(*cbMainThread)(std::function<void()>, bool), const char* addr, 
     , m_fixedFont( fixedWidth )
     , m_stcb( stcb )
     , m_sscb( sscb )
+    , m_acb( acb )
     , m_userData()
     , m_cbMainThread( cbMainThread )
 {
-    assert( s_instance == nullptr );
-    s_instance = this;
-
     InitMemory();
     InitTextEditor( fixedWidth );
 }
 
-View::View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb )
+View::View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb )
     : m_worker( f )
     , m_filename( f.GetFilename() )
     , m_staticView( true )
@@ -85,18 +81,17 @@ View::View( void(*cbMainThread)(std::function<void()>, bool), FileRead& f, ImFon
     , m_fixedFont( fixedWidth )
     , m_stcb( stcb )
     , m_sscb( sscb )
+    , m_acb( acb )
     , m_userData( m_worker.GetCaptureProgram().c_str(), m_worker.GetCaptureTime() )
     , m_cbMainThread( cbMainThread )
 {
-    assert( s_instance == nullptr );
-    s_instance = this;
-
     m_notificationTime = 4;
     m_notificationText = std::string( "Trace loaded in " ) + TimeToString( m_worker.GetLoadTime() );
 
     InitMemory();
     InitTextEditor( fixedWidth );
-    SetViewToLastFrames();
+    m_vd.zvStart = 0;
+    m_vd.zvEnd = m_worker.GetLastTime();
     m_userData.StateShouldBePreserved();
     m_userData.LoadState( m_vd );
     m_userData.LoadAnnotations( m_annotations );
@@ -119,9 +114,6 @@ View::~View()
 
     if( m_frameTexture ) FreeTexture( m_frameTexture, m_cbMainThread );
     if( m_playback.texture ) FreeTexture( m_playback.texture, m_cbMainThread );
-
-    assert( s_instance != nullptr );
-    s_instance = nullptr;
 }
 
 void View::InitMemory()
@@ -235,33 +227,38 @@ static const char* CompressionDesc[] = {
 
 static_assert( sizeof( CompressionName ) == sizeof( CompressionDesc ), "Unmatched compression names and descriptions" );
 
+
 bool View::Draw()
 {
-    HandshakeStatus status = (HandshakeStatus)s_instance->m_worker.GetHandshakeStatus();
+    HandshakeStatus status = (HandshakeStatus)m_worker.GetHandshakeStatus();
     switch( status )
     {
     case HandshakeProtocolMismatch:
+        Attention( m_attnProtoMismatch );
         ImGui::OpenPopup( "Protocol mismatch" );
         break;
     case HandshakeNotAvailable:
+        Attention( m_attnNotAvailable );
         ImGui::OpenPopup( "Client not ready" );
         break;
     case HandshakeDropped:
+        Attention( m_attnDropped );
         ImGui::OpenPopup( "Client disconnected" );
         break;
     default:
         break;
     }
 
-    const auto& failure = s_instance->m_worker.GetFailureType();
+    const auto& failure = m_worker.GetFailureType();
     if( failure != Worker::Failure::None )
     {
+        Attention( m_attnFailure );
         ImGui::OpenPopup( "Instrumentation failure" );
     }
 
     if( ImGui::BeginPopupModal( "Protocol mismatch", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        ImGui::PushFont( s_instance->m_bigFont );
+        ImGui::PushFont( m_bigFont );
         TextCentered( ICON_FA_TRIANGLE_EXCLAMATION );
         ImGui::PopFont();
         ImGui::TextUnformatted( "The client you are trying to connect to uses incompatible protocol version.\nMake sure you are using the same Tracy version on both client and server." );
@@ -270,6 +267,7 @@ bool View::Draw()
         {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
+            m_attnProtoMismatch = false;
             return false;
         }
         ImGui::SameLine();
@@ -277,7 +275,8 @@ bool View::Draw()
         {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
-            s_instance->m_reconnectRequested = true;
+            m_reconnectRequested = true;
+            m_attnProtoMismatch = false;
             return false;
         }
         ImGui::EndPopup();
@@ -285,7 +284,7 @@ bool View::Draw()
 
     if( ImGui::BeginPopupModal( "Client not ready", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        ImGui::PushFont( s_instance->m_bigFont );
+        ImGui::PushFont( m_bigFont );
         TextCentered( ICON_FA_LIGHTBULB );
         ImGui::PopFont();
         ImGui::TextUnformatted( "The client you are trying to connect to is no longer able to sent profiling data,\nbecause another server was already connected to it.\nYou can do the following:\n\n  1. Restart the client application.\n  2. Rebuild the client application with on-demand mode enabled." );
@@ -294,6 +293,7 @@ bool View::Draw()
         {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
+            m_attnNotAvailable = false;
             return false;
         }
         ImGui::SameLine();
@@ -301,7 +301,8 @@ bool View::Draw()
         {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
-            s_instance->m_reconnectRequested = true;
+            m_reconnectRequested = true;
+            m_attnNotAvailable = false;
             return false;
         }
         ImGui::EndPopup();
@@ -309,7 +310,7 @@ bool View::Draw()
 
     if( ImGui::BeginPopupModal( "Client disconnected", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        ImGui::PushFont( s_instance->m_bigFont );
+        ImGui::PushFont( m_bigFont );
         TextCentered( ICON_FA_HANDSHAKE );
         ImGui::PopFont();
         ImGui::TextUnformatted( "The client you are trying to connect to has disconnected during the initial\nconnection handshake. Please check your network configuration." );
@@ -318,6 +319,7 @@ bool View::Draw()
         {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
+            m_attnDropped = false;
             return false;
         }
         ImGui::SameLine();
@@ -325,7 +327,8 @@ bool View::Draw()
         {
             ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
-            s_instance->m_reconnectRequested = true;
+            m_reconnectRequested = true;
+            m_attnDropped = false;
             return false;
         }
         ImGui::EndPopup();
@@ -333,8 +336,8 @@ bool View::Draw()
 
     if( ImGui::BeginPopupModal( "Instrumentation failure", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        const auto& data = s_instance->m_worker.GetFailureData();
-        ImGui::PushFont( s_instance->m_bigFont );
+        const auto& data = m_worker.GetFailureData();
+        ImGui::PushFont( m_bigFont );
         TextCentered( ICON_FA_SKULL );
         ImGui::PopFont();
         ImGui::TextUnformatted( "Profiling session terminated due to improper instrumentation.\nPlease correct your program and try again." );
@@ -344,22 +347,22 @@ bool View::Draw()
         ImGui::Separator();
         if( data.srcloc != 0 )
         {
-            const auto& srcloc = s_instance->m_worker.GetSourceLocation( data.srcloc );
+            const auto& srcloc = m_worker.GetSourceLocation( data.srcloc );
             if( srcloc.name.active )
             {
-                TextFocused( "Zone name:", s_instance->m_worker.GetString( srcloc.name ) );
+                TextFocused( "Zone name:", m_worker.GetString( srcloc.name ) );
             }
-            TextFocused( "Function:", s_instance->m_worker.GetString( srcloc.function ) );
+            TextFocused( "Function:", m_worker.GetString( srcloc.function ) );
             TextDisabledUnformatted( "Location:" );
             ImGui::SameLine();
-            ImGui::TextUnformatted( LocationToString( s_instance->m_worker.GetString( srcloc.file ), srcloc.line ) );
+            ImGui::TextUnformatted( LocationToString( m_worker.GetString( srcloc.file ), srcloc.line ) );
         }
         if( data.thread != 0 )
         {
-            TextFocused( "Thread:", s_instance->m_worker.GetThreadName( data.thread ) );
+            TextFocused( "Thread:", m_worker.GetThreadName( data.thread ) );
             ImGui::SameLine();
             ImGui::TextDisabled( "(%s)", RealToString( data.thread ) );
-            if( s_instance->m_worker.IsThreadFiber( data.thread ) )
+            if( m_worker.IsThreadFiber( data.thread ) )
             {
                 ImGui::SameLine();
                 TextColoredUnformatted( ImVec4( 0.2f, 0.6f, 0.2f, 1.f ), "Fiber" );
@@ -382,11 +385,11 @@ bool View::Draw()
                     ImGui::TableSetupColumn( "Image" );
                     ImGui::TableHeadersRow();
 
-                    auto& cs = s_instance->m_worker.GetCallstack( data.callstack );
+                    auto& cs = m_worker.GetCallstack( data.callstack );
                     int fidx = 0;
                     for( auto& entry : cs )
                     {
-                        auto frameData = s_instance->m_worker.GetCallstackFrame( entry );
+                        auto frameData = m_worker.GetCallstackFrame( entry );
                         if( !frameData )
                         {
                             ImGui::TableNextRow();
@@ -394,7 +397,7 @@ bool View::Draw()
                             ImGui::Text( "%i", fidx++ );
                             ImGui::TableNextColumn();
                             char buf[32];
-                            sprintf( buf, "%p", (void*)s_instance->m_worker.GetCanonicalPointer( entry ) );
+                            sprintf( buf, "%p", (void*)m_worker.GetCanonicalPointer( entry ) );
                             ImGui::TextUnformatted( buf );
                             if( ImGui::IsItemHovered() )
                             {
@@ -413,7 +416,7 @@ bool View::Draw()
                             for( uint8_t f=0; f<fsz; f++ )
                             {
                                 const auto& frame = frameData->data[f];
-                                auto txt = s_instance->m_worker.GetString( frame.name );
+                                auto txt = m_worker.GetString( frame.name );
 
                                 if( fidx == 0 && f != fsz-1 )
                                 {
@@ -466,7 +469,7 @@ bool View::Draw()
                                 }
                                 ImGui::TableNextColumn();
                                 ImGui::PushTextWrapPos( 0.0f );
-                                txt = s_instance->m_worker.GetString( frame.file );
+                                txt = m_worker.GetString( frame.file );
                                 TextDisabledUnformatted( LocationToString( txt, frame.line ) );
                                 if( ImGui::IsItemHovered() )
                                 {
@@ -482,7 +485,7 @@ bool View::Draw()
                                 ImGui::TableNextColumn();
                                 if( frameData->imageName.Active() )
                                 {
-                                    TextDisabledUnformatted( s_instance->m_worker.GetString( frameData->imageName ) );
+                                    TextDisabledUnformatted( m_worker.GetString( frameData->imageName ) );
                                 }
                             }
                         }
@@ -497,21 +500,22 @@ bool View::Draw()
         if( ImGui::Button( "I understand" ) )
         {
             ImGui::CloseCurrentPopup();
-            s_instance->m_worker.ClearFailure();
+            m_worker.ClearFailure();
+            m_attnFailure = false;
         }
         ImGui::EndPopup();
     }
 
     bool saveFailed = false;
-    if( !s_instance->m_filenameStaging.empty() )
+    if( !m_filenameStaging.empty() )
     {
         ImGui::OpenPopup( "Save trace" );
     }
     if( ImGui::BeginPopupModal( "Save trace", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        assert( !s_instance->m_filenameStaging.empty() );
-        auto fn = s_instance->m_filenameStaging.c_str();
-        ImGui::PushFont( s_instance->m_bigFont );
+        assert( !m_filenameStaging.empty() );
+        auto fn = m_filenameStaging.c_str();
+        ImGui::PushFont( m_bigFont );
         TextFocused( "Path:", fn );
         ImGui::PopFont();
         ImGui::Separator();
@@ -542,7 +546,7 @@ bool View::Draw()
         ImGui::Unindent();
 
         static bool buildDict = false;
-        if( s_instance->m_worker.GetFrameImageCount() != 0 )
+        if( m_worker.GetFrameImageCount() != 0 )
         {
             ImGui::Separator();
             ImGui::Checkbox( "Build frame images dictionary", &buildDict );
@@ -553,14 +557,14 @@ bool View::Draw()
         ImGui::Separator();
         if( ImGui::Button( ICON_FA_FLOPPY_DISK " Save trace" ) )
         {
-            saveFailed = !s_instance->Save( fn, comp, zlvl, buildDict );
-            s_instance->m_filenameStaging.clear();
+            saveFailed = !Save( fn, comp, zlvl, buildDict );
+            m_filenameStaging.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if( ImGui::Button( "Cancel" ) )
         {
-            s_instance->m_filenameStaging.clear();
+            m_filenameStaging.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -569,7 +573,7 @@ bool View::Draw()
     if( saveFailed ) ImGui::OpenPopup( "Save failed" );
     if( ImGui::BeginPopupModal( "Save failed", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        ImGui::PushFont( s_instance->m_bigFont );
+        ImGui::PushFont( m_bigFont );
         TextCentered( ICON_FA_TRIANGLE_EXCLAMATION );
         ImGui::PopFont();
         ImGui::TextUnformatted( "Could not save trace at the specified location. Try again somewhere else." );
@@ -579,7 +583,7 @@ bool View::Draw()
     }
 
     s_time += ImGui::GetIO().DeltaTime;
-    return s_instance->DrawImpl();
+    return DrawImpl();
 }
 
 static const char* MainWindowButtons[] = {
@@ -607,6 +611,8 @@ bool View::DrawImpl()
         return keepOpen;
     }
 
+    Attention( m_attnWorking );
+
     if( !m_uarchSet )
     {
         m_uarchSet = true;
@@ -623,6 +629,7 @@ bool View::DrawImpl()
         char buf[1024];
         sprintf( buf, "Trace size %s (%.2f%% ratio)", MemSizeToString( dst ), 100.f * dst / src );
         m_notificationText = buf;
+        m_acb();
     }
 
     const auto& io = ImGui::GetIO();
@@ -734,6 +741,7 @@ bool View::DrawImpl()
         }
         else
         {
+            Attention( m_attnDisconnected );
             ImGui::BeginDisabled();
             ImGui::ButtonEx( MainWindowButtons[2], ImVec2( bw, 0 ) );
             ImGui::EndDisabled();

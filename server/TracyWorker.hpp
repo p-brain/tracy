@@ -385,9 +385,6 @@ private:
         unordered_flat_map<uint64_t, MemoryBlock> symbolCode;
         uint64_t symbolCodeSize = 0;
 
-        unordered_flat_map<uint64_t, uint64_t> codeAddressToLocation;
-        unordered_flat_map<uint64_t, Vector<uint64_t>> locationCodeAddressList;
-
         unordered_flat_map<const char*, MemoryBlock, charutil::Hasher, charutil::Comparator> sourceFileCache;
 
         unordered_flat_map<uint64_t, HwSampleData> hwSamples;
@@ -485,7 +482,6 @@ public:
     uint64_t GetSymbolsCount() const { return m_data.symbolMap.size(); }
     uint64_t GetSymbolCodeCount() const { return m_data.symbolCode.size(); }
     uint64_t GetSymbolCodeSize() const { return m_data.symbolCodeSize; }
-    uint64_t GetCodeLocationsSize() const { return m_data.codeAddressToLocation.size(); }
     uint64_t GetGhostZonesCount() const { return m_data.ghostCnt; }
     uint32_t GetFrameImageCount() const { return (uint32_t)m_data.frameImage.size(); }
     uint64_t GetStringsCount() const { return m_data.strings.size() + m_data.stringData.size(); }
@@ -546,7 +542,6 @@ public:
     uint64_t GetInlineSymbolForAddress( uint64_t address ) const;
     bool HasInlineSymbolAddresses() const { return !m_data.codeSymbolMap.empty(); }
     StringIdx GetLocationForAddress( uint64_t address, uint32_t& line ) const;
-    const Vector<uint64_t>* GetAddressesForLocation( uint32_t fileStringIdx, uint32_t line ) const;
     const uint64_t* GetInlineSymbolList( uint64_t sym, uint32_t len );
 
 #ifndef TRACY_NO_STATISTICS
@@ -738,7 +733,6 @@ private:
     tracy_force_inline void ProcessCallstackFrameSize( const QueueCallstackFrameSize& ev );
     tracy_force_inline void ProcessCallstackFrame( const QueueCallstackFrame& ev, bool querySymbols );
     tracy_force_inline void ProcessSymbolInformation( const QueueSymbolInformation& ev );
-    tracy_force_inline void ProcessCodeInformation( const QueueCodeInformation& ev );
     tracy_force_inline void ProcessCrashReport( const QueueCrashReport& ev );
     tracy_force_inline void ProcessSysTime( const QueueSysTime& ev );
     tracy_force_inline void ProcessContextSwitch( const QueueContextSwitch& ev );
@@ -751,6 +745,7 @@ private:
     tracy_force_inline void ProcessHwSampleBranchRetired( const QueueHwSample& ev );
     tracy_force_inline void ProcessHwSampleBranchMiss( const QueueHwSample& ev );
     tracy_force_inline void ProcessParamSetup( const QueueParamSetup& ev );
+    tracy_force_inline void ProcessSourceCodeNotAvailable( const QueueSourceCodeNotAvailable& ev );
     tracy_force_inline void ProcessCpuTopology( const QueueCpuTopology& ev );
     tracy_force_inline void ProcessMemNamePayload( const QueueMemNamePayload& ev );
     tracy_force_inline void ProcessFiberEnter( const QueueFiberEnter& ev );
@@ -868,7 +863,7 @@ private:
     void AddExternalThreadName( uint64_t ptr, const char* str, size_t sz );
     void AddFrameImageData( uint64_t ptr, const char* data, size_t sz );
     void AddSymbolCode( uint64_t ptr, const char* data, size_t sz );
-    void AddSourceCode( const char* data, size_t sz );
+    void AddSourceCode( uint32_t id, const char* data, size_t sz );
 
     tracy_force_inline void AddCallstackPayload( uint64_t ptr, const char* data, size_t sz );
     tracy_force_inline void AddCallstackAllocPayload( uint64_t ptr, const char* data, size_t sz );
@@ -1001,7 +996,6 @@ private:
     uint32_t m_pendingSourceLocation;
     uint32_t m_pendingCallstackFrames;
     uint8_t m_pendingCallstackSubframes;
-    uint32_t m_pendingCodeInformation;
     uint32_t m_pendingSymbolCode;
 
     CallstackFrameData* m_callstackFrameStaging;
@@ -1070,7 +1064,8 @@ private:
     size_t m_tmpBufSize = 0;
 
     unordered_flat_map<uint64_t, uint32_t> m_nextCallstack;
-    std::vector<const char*> m_sourceCodeQuery;
+    unordered_flat_map<uint32_t, const char*> m_sourceCodeQuery;
+    uint32_t m_nextSourceCodeQuery = 0;
 };
 
 }

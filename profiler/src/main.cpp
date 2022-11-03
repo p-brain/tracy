@@ -74,6 +74,7 @@ struct ClientData
     uint32_t protocolVersion;
     int32_t activeTime;
     uint16_t port;
+    uint64_t pid;
     std::string procName;
     std::string address;
 };
@@ -126,6 +127,11 @@ static void SetWindowTitleCallback( const char* title )
     sprintf( tmp, "%s - Tracy Profiler %i.%i.%i", title, tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch );
     bptr->SetTitle( tmp );
     s_customTitle = true;
+}
+
+static void AttentionCallback()
+{
+    bptr->Attention();
 }
 
 static void DrawContents();
@@ -248,6 +254,7 @@ int main( int argc, char** argv )
     connHist = &connHistory;
     filt = &filters;
 
+#ifndef __EMSCRIPTEN__
     if ( false ) // config check for new versions
     {
         updateThread = std::thread( [] {
@@ -262,6 +269,7 @@ int main( int argc, char** argv )
             } );
         } );
     }
+#endif
 
     auto iconThread = std::thread( [] {
         iconPx = stbi_load_from_memory( (const stbi_uc*)Icon_data, Icon_size, &iconX, &iconY, nullptr, 4 );
@@ -269,6 +277,8 @@ int main( int argc, char** argv )
 
     ImGuiTracyContext imguiContext;
     Backend backend( title, DrawContents, &mainThreadTasks );
+    tracy::InitTexture();
+    iconTex = tracy::MakeTexture();
     iconThread.join();
     backend.SetIcon( iconPx, iconX, iconY );
     bptr = &backend;
@@ -281,17 +291,16 @@ int main( int argc, char** argv )
         if( cnv != 0 ) dpiScale = cnv;
     }
 
-    iconTex = tracy::MakeTexture();
     SetupDPIScale( dpiScale, s_fixedWidth, s_bigFont, s_smallFont );
 
     if( initFileOpen )
     {
-        view = std::make_unique<tracy::View>( RunOnMainThread, *initFileOpen, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+        view = std::make_unique<tracy::View>( RunOnMainThread, *initFileOpen, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
         initFileOpen.reset();
     }
     else if( connectTo )
     {
-        view = std::make_unique<tracy::View>( RunOnMainThread, connectTo, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+        view = std::make_unique<tracy::View>( RunOnMainThread, connectTo, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
     }
 
     tracy::Fileselector::Init();
@@ -357,6 +366,7 @@ static void DrawContents()
     static uint16_t reconnectPort;
     static bool showFilter = false;
 
+#ifndef __EMSCRIPTEN__
     if( !view )
     {
         const auto time = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::system_clock::now().time_since_epoch() ).count();
@@ -377,17 +387,71 @@ static void DrawContents()
                 auto msg = broadcastListen->Read( len, addr, 0 );
                 if( !msg ) break;
                 if( len > sizeof( tracy::BroadcastMessage ) ) continue;
-                tracy::BroadcastMessage bm;
-                memcpy( &bm, msg, len );
-
-                if( bm.broadcastVersion == tracy::BroadcastVersion )
+                uint16_t broadcastVersion;
+                memcpy( &broadcastVersion, msg, sizeof( uint16_t ) );
+                if( broadcastVersion <= tracy::BroadcastVersion )
                 {
-                    const uint32_t protoVer = bm.protocolVersion;
-                    const auto procname = bm.programName;
-                    const auto activeTime = bm.activeTime;
-                    const auto listenPort = bm.listenPort;
-                    auto address = addr.GetText();
+                    uint32_t protoVer;
+                    char procname[tracy::WelcomeMessageProgramNameSize];
+                    int32_t activeTime;
+                    uint16_t listenPort;
+                    uint64_t pid;
 
+                    switch( broadcastVersion )
+                    {
+                    case 3:
+                    {
+                        tracy::BroadcastMessage bm;
+                        memcpy( &bm, msg, len );
+                        protoVer = bm.protocolVersion;
+                        strcpy( procname, bm.programName );
+                        activeTime = bm.activeTime;
+                        listenPort = bm.listenPort;
+                        pid = bm.pid;
+                        break;
+                    }
+                    case 2:
+                    {
+                        if( len > sizeof( tracy::BroadcastMessage_v2 ) ) continue;
+                        tracy::BroadcastMessage_v2 bm;
+                        memcpy( &bm, msg, len );
+                        protoVer = bm.protocolVersion;
+                        strcpy( procname, bm.programName );
+                        activeTime = bm.activeTime;
+                        listenPort = bm.listenPort;
+                        pid = 0;
+                        break;
+                    }
+                    case 1:
+                    {
+                        if( len > sizeof( tracy::BroadcastMessage_v1 ) ) continue;
+                        tracy::BroadcastMessage_v1 bm;
+                        memcpy( &bm, msg, len );
+                        protoVer = bm.protocolVersion;
+                        strcpy( procname, bm.programName );
+                        activeTime = bm.activeTime;
+                        listenPort = bm.listenPort;
+                        pid = 0;
+                        break;
+                    }
+                    case 0:
+                    {
+                        if( len > sizeof( tracy::BroadcastMessage_v0 ) ) continue;
+                        tracy::BroadcastMessage_v0 bm;
+                        memcpy( &bm, msg, len );
+                        protoVer = bm.protocolVersion;
+                        strcpy( procname, bm.programName );
+                        activeTime = bm.activeTime;
+                        listenPort = 8086;
+                        pid = 0;
+                        break;
+                    }
+                    default:
+                        assert( false );
+                        break;
+                    }
+
+                    auto address = addr.GetText();
                     const auto ipNumerical = addr.GetNumber();
                     const auto clientId = uint64_t( ipNumerical ) | ( uint64_t( listenPort ) << 32 );
                     auto it = clients.find( clientId );
@@ -408,14 +472,15 @@ static void DrawContents()
                                     } );
                             }
                             resolvLock.unlock();
-                            clients.emplace( clientId, ClientData { time, protoVer, activeTime, listenPort, procname, std::move( ip ) } );
+                            clients.emplace( clientId, ClientData { time, protoVer, activeTime, listenPort, pid, procname, std::move( ip ) } );
                         }
                         else
                         {
                             it->second.time = time;
                             it->second.activeTime = activeTime;
                             it->second.port = listenPort;
-                            if( it->second.protocolVersion != protoVer ) it->second.protocolVersion = protoVer;
+                            it->second.pid = pid;
+                            it->second.protocolVersion = protoVer;
                             if( strcmp( it->second.procName.c_str(), procname ) != 0 ) it->second.procName = procname;
                         }
                     }
@@ -444,6 +509,7 @@ static void DrawContents()
     {
         clients.clear();
     }
+#endif
 
     int display_w, display_h;
     bptr->NewFrame( display_w, display_h );
@@ -657,11 +723,11 @@ static void DrawContents()
             {
                 std::string addrPart = std::string( addr, ptr );
                 uint16_t portPart = (uint16_t)atoi( ptr+1 );
-                view = std::make_unique<tracy::View>( RunOnMainThread, addrPart.c_str(), portPart, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+                view = std::make_unique<tracy::View>( RunOnMainThread, addrPart.c_str(), portPart, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
             }
             else
             {
-                view = std::make_unique<tracy::View>( RunOnMainThread, addr, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+                view = std::make_unique<tracy::View>( RunOnMainThread, addr, port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
             }
         }
         ImGui::SameLine( 0, ImGui::GetTextLineHeight() * 2 );
@@ -678,7 +744,7 @@ static void DrawContents()
                         loadThread = std::thread( [f] {
                             try
                             {
-                                view = std::make_unique<tracy::View>( RunOnMainThread, *f, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+                                view = std::make_unique<tracy::View>( RunOnMainThread, *f, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
                             }
                             catch( const tracy::UnsupportedVersion& e )
                             {
@@ -793,6 +859,10 @@ static void DrawContents()
                     }
                     tracy::TextFocused( "IP:", v.second.address.c_str() );
                     tracy::TextFocused( "Port:", portstr );
+                    if( v.second.pid != 0 )
+                    {
+                        tracy::TextFocused( "PID:", tracy::RealToString( v.second.pid ) );
+                    }
                     ImGui::EndTooltip();
                 }
                 if( v.second.port != port )
@@ -802,7 +872,7 @@ static void DrawContents()
                 }
                 if( selected && !loadThread.joinable() )
                 {
-                    view = std::make_unique<tracy::View>( RunOnMainThread, v.second.address.c_str(), v.second.port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+                    view = std::make_unique<tracy::View>( RunOnMainThread, v.second.address.c_str(), v.second.port, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
                 }
                 ImGui::NextColumn();
                 const auto acttime = ( v.second.activeTime + ( time - v.second.time ) / 1000 ) * 1000000000ll;
@@ -971,7 +1041,7 @@ static void DrawContents()
         viewShutdown.store( ViewShutdown::False, std::memory_order_relaxed );
         if( reconnect )
         {
-            view = std::make_unique<tracy::View>( RunOnMainThread, reconnectAddr.c_str(), reconnectPort, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback );
+            view = std::make_unique<tracy::View>( RunOnMainThread, reconnectAddr.c_str(), reconnectPort, s_fixedWidth, s_smallFont, s_bigFont, SetWindowTitleCallback, SetupScaleCallback, AttentionCallback );
         }
         break;
     default:
@@ -986,6 +1056,16 @@ static void DrawContents()
         animTime += ImGui::GetIO().DeltaTime;
         tracy::DrawWaitingDots( animTime );
         ImGui::TextUnformatted( "Please wait, cleanup is in progress" );
+        ImGui::EndPopup();
+    }
+
+    if( tracy::Fileselector::HasFailed() ) ImGui::OpenPopup( "File selector is not available" );
+    if( ImGui::BeginPopupModal( "File selector is not available", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+    {
+        ImGui::TextUnformatted( "File selector cannot be displayed." );
+        ImGui::TextUnformatted( "Check nfd library implementation for details." );
+        ImGui::Separator();
+        if( ImGui::Button( "Ok" ) ) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
