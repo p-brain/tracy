@@ -230,6 +230,8 @@ public:
 #endif
     }
 
+    tracy_force_inline int64_t TscTime( int64_t tsc ) { return int64_t( ( tsc - m_initTime ) * m_timerMul ); }
+
     tracy_force_inline uint32_t GetNextZoneId()
     {
         return m_zoneId.fetch_add( 1, std::memory_order_relaxed );
@@ -259,13 +261,19 @@ public:
 
     static tracy_force_inline void SendFrameMark( const char* name )
     {
-        if( !name ) GetProfiler().m_frameCount.fetch_add( 1, std::memory_order_relaxed );
+        uint64_t frameTime = GetTime();
+        if ( !name )
+        {
+            GetProfiler().m_frameCount.fetch_add( 1, std::memory_order_relaxed );
+            GetProfiler().m_frameTime = frameTime;
+        }
+
 #ifdef TRACY_ON_DEMAND
         if( !GetProfiler().IsConnected() ) return;
 #endif
         auto item = QueueSerial();
         MemWrite( &item->hdr.type, QueueType::FrameMarkMsg );
-        MemWrite( &item->frameMark.time, GetTime() );
+        MemWrite( &item->frameMark.time, frameTime );
         MemWrite( &item->frameMark.name, uint64_t( name ) );
         QueueSerialFinish();
     }
@@ -885,6 +893,7 @@ private:
 #endif
 
     double m_timerMul;
+    int64_t m_initTime;
     uint64_t m_resolution;
     uint64_t m_delay;
     std::atomic<int64_t> m_timeBegin;
@@ -924,6 +933,9 @@ private:
     SPSCQueue<SymbolQueueItem> m_symbolQueue;
 
     std::atomic<uint64_t> m_frameCount;
+public:
+    std::atomic<uint64_t> m_frameTime;
+private:
     std::atomic<bool> m_isConnected;
 #ifdef TRACY_ON_DEMAND
     std::atomic<uint64_t> m_connectionId;

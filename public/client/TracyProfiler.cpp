@@ -3515,6 +3515,7 @@ void Profiler::HandleDisconnect()
 void Profiler::CalibrateTimer()
 {
     m_timerMul = 1.;
+    m_initTime = GetInitTime();
 
 #ifdef TRACY_HW_TIMER
 
