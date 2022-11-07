@@ -160,7 +160,7 @@ tracy_force_inline void TracyGPUS2StartQuery( SceneViewTimestampQuery_t *pTimest
     tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuZoneBeginAllocSrcLocSerial );
     tracy::MemWrite( &item->gpuZoneBegin.cpuTime, tracy::Profiler::GetTime() );
     tracy::MemWrite( &item->gpuZoneBegin.srcloc, sourceLocation );
-    tracy::MemWrite( &item->gpuZoneBegin.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneBegin.thread, 0 );
     tracy::MemWrite( &item->gpuZoneBegin.queryId, queryId );
     tracy::MemWrite( &item->gpuZoneBegin.context, g_tracyCtx->GetId() );
 
@@ -185,7 +185,7 @@ tracy_force_inline void TracyGPUS2EndQuery( SceneViewTimestampQuery_t *pTimestam
     const auto queryId = g_tracyCtx->NextQueryId();
     tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuZoneEndSerial );
     tracy::MemWrite( &item->gpuZoneEnd.cpuTime, tracy::Profiler::GetTime() );
-    tracy::MemWrite( &item->gpuZoneEnd.thread, tracy::GetThreadHandle() );
+    tracy::MemWrite( &item->gpuZoneEnd.thread, 0 );
     tracy::MemWrite( &item->gpuZoneEnd.queryId, uint16_t( queryId ) );
     tracy::MemWrite( &item->gpuZoneEnd.context, g_tracyCtx->GetId() );
 
