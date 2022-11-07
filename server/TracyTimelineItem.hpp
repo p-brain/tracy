@@ -33,6 +33,7 @@ protected:
 
     virtual void HeaderTooltip( const char* label ) const {};
     virtual void HeaderExtraContents( int offset, const ImVec2& wpos, float labelWidth, double pxns, bool hover ) {};
+    virtual void HeaderExtraPopupItems() {};
 
     virtual int64_t RangeBegin() const = 0;
     virtual int64_t RangeEnd() const = 0;

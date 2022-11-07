@@ -112,6 +112,7 @@ void TimelineItem::Draw( bool firstFrame, double pxns, int& offset, const ImVec2
             SetVisible( false );
             ImGui::CloseCurrentPopup();
         }
+        HeaderExtraPopupItems();
         ImGui::EndPopup();
     }
 

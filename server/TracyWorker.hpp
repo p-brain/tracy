@@ -660,6 +660,8 @@ public:
 
     void CacheSourceFiles();
 
+    void CreateZonesFromGpuData();
+
 private:
     void Network();
     void Exec();
@@ -938,6 +940,9 @@ private:
     int64_t TscTime( int64_t tsc ) { return int64_t( ( tsc - m_data.baseTime ) * m_timerMul ); }
     int64_t TscTime( uint64_t tsc ) { return int64_t( ( tsc - m_data.baseTime ) * m_timerMul ); }
     int64_t TscPeriod( uint64_t tsc ) { return int64_t( tsc * m_timerMul ); }
+
+    template<typename Adapter, typename V>
+    void CreateZonesFromGpuDataImpl( const V &vec, uint64_t gpuThreadId );
 
     Socket m_sock;
     std::string m_addr;

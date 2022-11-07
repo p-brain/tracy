@@ -694,7 +694,8 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
 
     f.Read( sz );
     m_data.stringMap.reserve( sz );
-    m_data.stringData.reserve_exact( sz, m_slab );
+    m_data.stringData.reserve( sz );
+    m_data.stringData.set_size( sz );
     for( uint64_t i=0; i<sz; i++ )
     {
         uint64_t ptr, ssz;
@@ -933,7 +934,8 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     memset( (char*)m_data.zoneChildren.data(), 0, sizeof( Vector<short_ptr<ZoneEvent>> ) * sz );
     int32_t childIdx = 0;
     f.Read( sz );
-    m_data.threads.reserve_exact( sz, m_slab );
+    m_data.threads.reserve( sz );
+    m_data.threads.set_size( sz );
     for( uint64_t i=0; i<sz; i++ )
     {
         auto td = m_slab.AllocInit<ThreadData>();
@@ -8498,6 +8500,111 @@ void Worker::CacheSourceFiles()
         {
             if( SourceFileValid( file, execTime != 0 ? execTime : GetCaptureTime() ) ) CacheSourceFromFile( file );
         }
+    }
+}
+
+void Worker::CreateZonesFromGpuData()
+{
+    const auto& vecGpuData = GetGpuData();
+    if ( vecGpuData.empty() ) return;
+
+    assert( vecGpuData.size() == 1 );
+    const GpuCtxData *pGpuData = vecGpuData[ 0 ];
+
+    if ( pGpuData->threadData.empty() ) return;
+    
+    const uint64_t gpuThreadId = std::numeric_limits<uint64_t>::max() - 1;
+
+    // Check if we already created the cpu zones
+    if ( m_data.threadNames.find( gpuThreadId ) != m_data.threadNames.end() ) return;
+
+    // Create thread
+    m_data.threadNames.emplace( gpuThreadId, "???" );
+    m_pendingThreads++;
+    char buf[ 128 ];
+    int len = snprintf( buf, sizeof( buf ), "%s [generated]", GetString( pGpuData->name ) );
+    AddThreadString( gpuThreadId, buf, len );
+
+    NoticeThread( gpuThreadId );
+
+    // Iterate gpu zone of the first thread (assumign single threaded mode)
+    const GpuCtxThreadData &threadData = pGpuData->threadData.begin()->second;
+    auto &tl = threadData.timeline;
+    if ( tl.is_magic() )
+    {
+        CreateZonesFromGpuDataImpl<VectorAdapterDirect<GpuEvent>>( *( Vector<GpuEvent>* ) & tl, gpuThreadId );
+    }
+    else
+    {
+        CreateZonesFromGpuDataImpl< VectorAdapterPointer<GpuEvent>>( tl, gpuThreadId );
+    }
+}
+
+template<typename Adapter, typename V>
+void Worker::CreateZonesFromGpuDataImpl( const V &vec, uint64_t gpuThreadId )
+{
+    if ( m_threadCtx != gpuThreadId )
+    {
+        m_threadCtx = gpuThreadId;
+        m_threadCtxData = RetrieveThread( gpuThreadId );
+    }
+
+    Adapter a;
+    for ( auto &val : vec )
+    {
+        const GpuEvent& gpuEvent = a( val );
+
+        ZoneEvent *pZone = AllocZoneEvent();
+        pZone->SetStartSrcLoc( gpuEvent.GpuStart(), gpuEvent.SrcLoc() );
+        pZone->SetEnd( -1 );
+        pZone->SetChild( -1 );
+
+        NewZone( pZone );
+
+        assert( !m_threadCtxData->zoneIdStack.empty() );
+        m_threadCtxData->zoneIdStack.pop_back();
+        auto &stack = m_threadCtxData->stack;
+        auto zone = stack.back_and_pop();
+        const auto isReentry = m_threadCtxData->DecStackCount( zone->SrcLoc() );
+        zone->SetEnd( gpuEvent.GpuEnd() );
+
+#ifndef TRACY_NO_STATISTICS
+        assert( !m_threadCtxData->childTimeStack.empty() );
+        const auto timeSpan = gpuEvent.GpuEnd() - gpuEvent.GpuStart();
+        if ( timeSpan > 0 )
+        {
+            ZoneThreadData ztd;
+            ztd.SetZone( zone );
+            ztd.SetThread( CompressThread( gpuThreadId ) );
+            auto slz = GetSourceLocationZones( zone->SrcLoc() );
+            slz->zones.push_back( ztd );
+            if ( slz->min > timeSpan ) slz->min = timeSpan;
+            if ( slz->max < timeSpan ) slz->max = timeSpan;
+            slz->total += timeSpan;
+            slz->sumSq += double( timeSpan ) * timeSpan;
+            const auto selfSpan = timeSpan - m_threadCtxData->childTimeStack.back_and_pop();
+            if ( slz->selfMin > selfSpan ) slz->selfMin = selfSpan;
+            if ( slz->selfMax < selfSpan ) slz->selfMax = selfSpan;
+            slz->selfTotal += selfSpan;
+            if ( !isReentry )
+            {
+                slz->nonReentrantCount++;
+                if ( slz->nonReentrantMin > timeSpan ) slz->nonReentrantMin = timeSpan;
+                if ( slz->nonReentrantMax < timeSpan ) slz->nonReentrantMax = timeSpan;
+                slz->nonReentrantTotal += timeSpan;
+            }
+            if ( !m_threadCtxData->childTimeStack.empty() )
+            {
+                m_threadCtxData->childTimeStack.back() += timeSpan;
+            }
+        }
+        else
+        {
+            m_threadCtxData->childTimeStack.pop_back();
+        }
+#else
+        CountZoneStatistics( zone );
+#endif
     }
 }
 

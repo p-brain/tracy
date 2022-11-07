@@ -137,6 +137,15 @@ void TimelineItemGpu::HeaderExtraContents( int offset, const ImVec2& wpos, float
     }
 }
 
+void TimelineItemGpu::HeaderExtraPopupItems()
+{
+    if ( ImGui::MenuItem( ICON_FA_MICROCHIP " Generate CPU zones" ) )
+    {
+        m_worker.CreateZonesFromGpuData();
+        ImGui::CloseCurrentPopup();
+    }
+}
+
 int64_t TimelineItemGpu::RangeBegin() const
 {
     int64_t t = std::numeric_limits<int64_t>::max();
