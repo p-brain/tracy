@@ -52,14 +52,11 @@ namespace tracy
         enum { QueryCount = 0xFFFE };
 
     public:
-        GPUS2Ctx()
+        GPUS2Ctx( int64_t tcpu, int64_t tgpu )
             : m_context( GetGpuCtxCounter().fetch_add( 1, std::memory_order_relaxed ) )
             , m_idx( 0 )
         {
             assert( m_context != 255 );
-
-            int64_t tcpu = Profiler::GetTime();
-            int64_t tgpu = GetProfiler().TscTime( Profiler::GetTime() );
 
             uint8_t flags = 0;
 
@@ -73,11 +70,6 @@ namespace tracy
             MemWrite( &item->gpuNewContext.context, m_context );
             MemWrite( &item->gpuNewContext.flags, flags );
             MemWrite( &item->gpuNewContext.type, GpuContextType::GPUS2 );
-
-#ifdef TRACY_ON_DEMAND
-            GetProfiler().DeferItem( *item );
-#endif
-
 
             Profiler::QueueSerialFinish();
         }
@@ -96,9 +88,7 @@ namespace tracy
             MemWrite( &item->gpuContextNameFat.context, m_context );
             MemWrite( &item->gpuContextNameFat.ptr, ( uint64_t ) ptr );
             MemWrite( &item->gpuContextNameFat.size, len );
-#ifdef TRACY_ON_DEMAND
-            GetProfiler().DeferItem( *item );
-#endif
+
             Profiler::QueueSerialFinish();
         }
 
@@ -123,10 +113,10 @@ namespace tracy
     };
 
 
-    static inline GPUS2Ctx *CreateGPUS2Context()
+    static inline GPUS2Ctx *CreateGPUS2Context( int64_t tcpu, int64_t tgpu )
     {
         auto ctx = ( GPUS2Ctx * ) tracy_malloc( sizeof( GPUS2Ctx ) );
-        new( ctx ) GPUS2Ctx( );
+        new( ctx ) GPUS2Ctx( tcpu, tgpu );
         return ctx;
     }
 
@@ -139,14 +129,14 @@ namespace tracy
 
 extern tracy::GPUS2Ctx *g_tracyCtx;
 
-#define TracyGPUS2Context(  ) tracy::CreateGPUS2Context(  );
+#define TracyGPUS2Context( tcpu, tgpu ) tracy::CreateGPUS2Context( tcpu, tgpu );
 #define TracyGPUS2Destroy(ctx) tracy::DestroyGPUS2Context(ctx);
 #define TracyGPUS2ContextName(ctx, name, size) ctx->Name(name, size);
 
 tracy_force_inline void TracyGPUS2StartQuery( SceneViewTimestampQuery_t *pTimestampQuery, uint32_t line, const char *source, size_t sourceSz, const char *function, size_t functionSz, const char *name, size_t nameSz )
 {
 #ifdef TRACY_ON_DEMAND
-    if ( !tracy::GetProfiler().IsConnected() )
+    if ( !tracy::GetProfiler().IsConnected() || !g_tracyCtx )
     {
         pTimestampQuery->m_nTracyStartQueryId = 0xFFFF;
         return;
@@ -174,7 +164,7 @@ tracy_force_inline void TracyGPUS2StartQuery( SceneViewTimestampQuery_t *pTimest
 
 tracy_force_inline void TracyGPUS2EndQuery( SceneViewTimestampQuery_t *pTimestampQuery )
 {
-    if ( !tracy::GetProfiler().IsConnected() )
+    if ( !tracy::GetProfiler().IsConnected() || !g_tracyCtx )
     {
         pTimestampQuery->m_nTracyStartQueryId = 0xFFFF;
         return;
@@ -198,7 +188,7 @@ tracy_force_inline void TracyGPUS2CollectQuery( uint16_t queryId, int64_t time )
 {
 #ifdef TRACY_ON_DEMAND
 
-    if ( ( !tracy::GetProfiler().IsConnected() ) || queryId == 0xFFFF  ) 
+    if ( ( !tracy::GetProfiler().IsConnected() ) || queryId == 0xFFFF || !g_tracyCtx )
     {
         return;
     }
