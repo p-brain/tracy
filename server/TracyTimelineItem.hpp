@@ -48,10 +48,8 @@ protected:
 
 private:
     void AdjustThreadHeight( bool firstFrame, int oldOffset, int& offset );
-    float AdjustThreadPosition( float wy, int& offset );
 
     int m_height;
-    int m_offset;
 
 protected:
     View& m_view;

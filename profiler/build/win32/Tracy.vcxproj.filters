@@ -378,6 +378,9 @@
     <ClCompile Include="..\..\..\server\TracyFileselector.cpp">
       <Filter>server</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\IsElevated.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\GetMainWindowHandle.cpp">
       <Filter>src</Filter>
     </ClCompile>    
@@ -770,9 +773,12 @@
     <ClInclude Include="..\..\..\server\TracyFileselector.hpp">
       <Filter>server</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\GetMainWindowHandle.h">
+    <ClInclude Include="..\..\src\IsElevated.hpp">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\GetMainWindowHandle.h">
+      <Filter>src</Filter>
+    </ClInclude>    
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />

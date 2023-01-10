@@ -31,7 +31,7 @@ struct MicroArchUx
 };
 
 static constexpr MicroArchUx s_uArchUx[] = {
-    { "AMD Zen 4", "Ryzen 9 7950X", "ZEN4" },
+    { "AMD Zen 4", "Ryzen 5 7600X", "ZEN4" },
     { "AMD Zen 3", "Ryzen 5 5600X", "ZEN3" },
     { "AMD Zen 2", "Ryzen 7 3700X", "ZEN2" },
     { "AMD Zen+", "Ryzen 5 2600", "ZEN+" },
@@ -714,6 +714,7 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
         if( insn[cnt-1].address - symAddr + insn[cnt-1].size < len ) m_disasmFail = insn[cnt-1].address - symAddr;
         int bytesMax = 0;
         int mLenMax = 0;
+        int oLenMax = 0;
         m_asm.reserve( cnt );
         for( size_t i=0; i<cnt; i++ )
         {
@@ -944,6 +945,8 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
 
             const auto mLen = (int)strlen( op.mnemonic );
             if( mLen > mLenMax ) mLenMax = mLen;
+            const auto oLen = (int)strlen( op.op_str );
+            if( oLen > oLenMax ) oLenMax = oLen;
             if( op.size > bytesMax ) bytesMax = op.size;
 
             uint32_t mLineMax = 0;
@@ -962,6 +965,7 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
         }
         cs_free( insn, cnt );
         m_maxMnemonicLen = mLenMax + 1;
+        m_maxOperandLen = oLenMax + 1;
         m_maxAsmBytes = bytesMax;
         if( !m_jumpTable.empty() )
         {
@@ -5564,7 +5568,7 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
         {
             symName = worker.GetString( sym->name );
         }
-        fprintf( f, "; Tracy Profiler disassembly of symbol %s [%s]\n\n", symName, worker.GetCaptureProgram().c_str() );
+        fprintf( f, "# Tracy Profiler disassembly of symbol %s [%s]\n\n", symName, worker.GetCaptureProgram().c_str() );
         if( !m_atnt ) fprintf( f, ".intel_syntax\n\n" );
 
         const auto end = m_asm.size() < stop ? m_asm.size() : stop;
@@ -5577,12 +5581,13 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
                 fprintf( f, ".L%" PRIu32 ":\n", it->second );
             }
             bool hasJump = false;
+            int psz = 0;
             if( v.jumpAddr != 0 )
             {
                 auto lit = m_locMap.find( v.jumpAddr );
                 if( lit != m_locMap.end() )
                 {
-                    fprintf( f, "\t%-*s.L%" PRIu32 "\n", m_maxMnemonicLen, v.mnemonic.c_str(), lit->second );
+                    psz = fprintf( f, "\t%-*s.L%" PRIu32, m_maxMnemonicLen, v.mnemonic.c_str(), lit->second );
                     hasJump = true;
                 }
             }
@@ -5590,12 +5595,24 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
             {
                 if( v.operands.empty() )
                 {
-                    fprintf( f, "\t%s\n", v.mnemonic.c_str() );
+                    psz = fprintf( f, "\t%s", v.mnemonic.c_str() );
                 }
                 else
                 {
-                    fprintf( f, "\t%-*s%s\n", m_maxMnemonicLen, v.mnemonic.c_str(), v.operands.c_str() );
+                    psz = fprintf( f, "\t%-*s%s", m_maxMnemonicLen, v.mnemonic.c_str(), v.operands.c_str() );
                 }
+            }
+            uint32_t srcline;
+            const auto srcidx = worker.GetLocationForAddress( v.addr, srcline );
+            if( srcline != 0 && psz > 0 )
+            {
+                int spaces = std::max( m_maxMnemonicLen + m_maxOperandLen - psz, 0 ) + 1;
+                while( spaces-- ) fputc( ' ', f );
+                fprintf( f, "# %s:%i\n", worker.GetString( srcidx ), srcline );
+            }
+            else
+            {
+                fputc( '\n', f );
             }
         }
         fclose( f );

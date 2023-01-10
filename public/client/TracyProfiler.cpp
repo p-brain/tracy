@@ -1415,9 +1415,9 @@ void Profiler::SpawnWorkerThreads()
 
 #if defined _WIN32 && !defined TRACY_UWP && !defined TRACY_NO_CRASH_HANDLER
     s_profilerThreadId = GetThreadId( s_thread->Handle() );
-#ifdef TRACY_HAS_CALLSTACK
+#  ifdef TRACY_HAS_CALLSTACK
     s_symbolThreadId = GetThreadId( s_symbolThread->Handle() );
-#endif
+#  endif
     m_exceptionHandler = AddVectoredExceptionHandler( 1, CrashFilter );
 #endif
 
@@ -1456,7 +1456,7 @@ Profiler::~Profiler()
     if( m_crashHandlerInstalled ) RemoveVectoredExceptionHandler( m_exceptionHandler );
 #endif
 
-#ifdef __linux__
+#if defined __linux__ && !defined TRACY_NO_CRASH_HANDLER
     if( m_crashHandlerInstalled )
     {
         sigaction( TRACY_CRASH_SIGNAL, &m_prevSignal.pwr, nullptr );
@@ -1522,7 +1522,7 @@ bool Profiler::ShouldExit()
 
 void Profiler::Worker()
 {
-#ifdef __linux__
+#if defined __linux__ && !defined TRACY_NO_CRASH_HANDLER
     s_profilerTid = syscall( SYS_gettid );
 #endif
 
@@ -3547,7 +3547,7 @@ void Profiler::CalibrateDelay()
     constexpr int Events = Iterations * 2;   // start + end
     static_assert( Events < QueuePrealloc, "Delay calibration loop will allocate memory in queue" );
 
-    static const tracy::SourceLocationData __tracy_source_location { nullptr, __FUNCTION__,  __FILE__, (uint32_t)__LINE__, 0 };
+    static const tracy::SourceLocationData __tracy_source_location { nullptr, TracyFunction,  TracyFile, (uint32_t)TracyLine, 0 };
     const auto t0 = GetTime();
     for( int i=0; i<Iterations; i++ )
     {
@@ -4148,6 +4148,8 @@ TRACY_API void ___tracy_emit_frame_mark_start( const char* name ) { tracy::Profi
 TRACY_API void ___tracy_emit_frame_mark_end( const char* name ) { tracy::Profiler::SendFrameMark( name, tracy::QueueType::FrameMarkMsgEnd ); }
 TRACY_API void ___tracy_emit_frame_image( const void* image, uint16_t w, uint16_t h, uint8_t offset, int flip ) { tracy::Profiler::SendFrameImage( image, w, h, offset, flip ); }
 TRACY_API void ___tracy_emit_plot( const char* name, double val ) { tracy::Profiler::PlotData( name, val ); }
+TRACY_API void ___tracy_emit_plot_float( const char* name, float val ) { tracy::Profiler::PlotData( name, val ); }
+TRACY_API void ___tracy_emit_plot_int( const char* name, int64_t val ) { tracy::Profiler::PlotData( name, val ); }
 TRACY_API void ___tracy_emit_message( const char* txt, size_t size, int callstack ) { tracy::Profiler::Message( txt, size, callstack ); }
 TRACY_API void ___tracy_emit_messageL( const char* txt, int callstack ) { tracy::Profiler::Message( txt, callstack ); }
 TRACY_API void ___tracy_emit_messageC( const char* txt, size_t size, uint32_t color, int callstack ) { tracy::Profiler::MessageColor( txt, size, color, callstack ); }
