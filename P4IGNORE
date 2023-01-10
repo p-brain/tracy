@@ -6,7 +6,6 @@ win32/x64/
 .github/
 .vscode
 /vcpkg/vcpkg/
-/vcpkg_installed/
 *.tss
 *.vcxproj.user
 *.args.json
