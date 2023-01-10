@@ -363,7 +363,7 @@ void View::DrawZoneInfoWindow()
             if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
             {
                 std::string cmd;
-                cmd = cmd + "c:\\binbat\\vsedit.bat " + fileName + " " + std::to_string(srcloc.line);
+                cmd = cmd + "..\\..\\..\\..\\..\\profiler\\utils\\openinvs\\openinvs.exe " + fileName + " " + std::to_string(srcloc.line);
                 system( cmd.c_str() );               
             }
             if( hilite )
@@ -1418,10 +1418,10 @@ void View::DrawGpuInfoWindow()
                 ViewSource( fileName, srcloc.line );
             }
             ImGui::SameLine();
-            if (ImGui::Button( ICON_FA_FILE_CODE " MsVc" ))
+            if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
             {
                 std::string cmd;
-                cmd = cmd + "c:\\binbat\\vsedit.bat " + fileName + " " + std::to_string( srcloc.line );
+                cmd = cmd + "..\\..\\..\\..\\..\\profiler\\utils\\openinvs\\openinvs.exe " + fileName + " " + std::to_string(srcloc.line);
                 system( cmd.c_str() );
             }
             if( hilite )
