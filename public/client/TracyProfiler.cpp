@@ -3033,9 +3033,9 @@ void Profiler::SendSourceLocation( uint64_t ptr )
     MemWrite( &item.srcloc.file, (uint64_t)srcloc->file );
     MemWrite( &item.srcloc.function, (uint64_t)srcloc->function );
     MemWrite( &item.srcloc.line, srcloc->line );
-    MemWrite( &item.srcloc.r, uint8_t( ( srcloc->color       ) & 0xFF ) );
+    MemWrite( &item.srcloc.b, uint8_t( ( srcloc->color       ) & 0xFF ) );
     MemWrite( &item.srcloc.g, uint8_t( ( srcloc->color >> 8  ) & 0xFF ) );
-    MemWrite( &item.srcloc.b, uint8_t( ( srcloc->color >> 16 ) & 0xFF ) );
+    MemWrite( &item.srcloc.r, uint8_t( ( srcloc->color >> 16 ) & 0xFF ) );
     AppendData( &item, QueueDataSize[(int)QueueType::SourceLocation] );
 }
 
@@ -4118,9 +4118,9 @@ TRACY_API void ___tracy_emit_zone_color( TracyCZoneCtx ctx, uint32_t color ) {
 #endif
     {
         TracyQueuePrepareC( tracy::QueueType::ZoneColor );
-        tracy::MemWrite( &item->zoneColor.r, uint8_t( ( color       ) & 0xFF ) );
+        tracy::MemWrite( &item->zoneColor.b, uint8_t( ( color       ) & 0xFF ) );
         tracy::MemWrite( &item->zoneColor.g, uint8_t( ( color >> 8  ) & 0xFF ) );
-        tracy::MemWrite( &item->zoneColor.b, uint8_t( ( color >> 16 ) & 0xFF ) );
+        tracy::MemWrite( &item->zoneColor.r, uint8_t( ( color >> 16 ) & 0xFF ) );
         TracyQueueCommitC( zoneColorThread );
     }
 }

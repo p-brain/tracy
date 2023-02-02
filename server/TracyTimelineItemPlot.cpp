@@ -9,7 +9,7 @@ namespace tracy
 {
 
 TimelineItemPlot::TimelineItemPlot( View& view, Worker& worker, PlotData* plot )
-    : TimelineItem( view, worker )
+    : TimelineItem( view, worker, plot )
     , m_plot( plot )
 {
     if ( plot->type == PlotType::SysTime ) SetVisible( false ); // Default off
