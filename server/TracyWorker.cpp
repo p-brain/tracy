@@ -2912,11 +2912,14 @@ void Worker::Exec()
     }
 
     // PRB : of ipaddr is localhost, lets give the app we are connecting to focus
-    if ( (m_addr == "localhost") || (m_addr == "127.0.0.1") )
+    //if ( (m_addr == "localhost") || (m_addr == "127.0.0.1") )
     {
         HWND targetWindow = find_main_window(m_pid);
-        ShowWindowAsync( targetWindow, 1 );
-        SetForegroundWindow( targetWindow );
+        if ( targetWindow )
+        {
+            ShowWindowAsync( targetWindow, 1 );
+            SetForegroundWindow( targetWindow );
+        }
     }
 
     m_serverQuerySpaceBase = m_serverQuerySpaceLeft = std::min( ( m_sock.GetSendBufSize() / ServerQueryPacketSize ), 8*1024 ) - 4;   // leave space for terminate request

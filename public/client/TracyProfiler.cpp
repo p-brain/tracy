@@ -4,6 +4,7 @@
 #  ifndef NOMINMAX
 #    define NOMINMAX
 #  endif
+#  include "stdlib.h"
 #  include <winsock2.h>
 #  include <windows.h>
 #  include <tlhelp32.h>
@@ -1560,7 +1561,13 @@ void Profiler::Worker()
         }
     }
 
-    const auto procname = GetProcessName();
+    static char buf[ _MAX_PATH ];
+    auto procname = GetProcessName();
+    if ( strstr( GetCommandLineA(), "-dedicated" ) && (strlen( procname) + strlen("DS_") < _MAX_PATH ) )
+    {
+        sprintf( buf, "DS_%s", procname );
+        procname = buf;
+    }
     const auto pnsz = std::min<size_t>( strlen( procname ), WelcomeMessageProgramNameSize - 1 );
 
     const auto hostinfo = GetHostInfo();
