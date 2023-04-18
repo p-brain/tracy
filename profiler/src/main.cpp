@@ -138,7 +138,7 @@ static void AttentionCallback()
 
 static void DrawContents();
 
-void RunOnMainThread( std::function<void()> cb, bool forceDelay = false )
+static void RunOnMainThread( const std::function<void()>& cb, bool forceDelay = false )
 {
     mainThreadTasks.Queue( cb, forceDelay );
 }
@@ -678,7 +678,7 @@ static void DrawContents()
                         HttpRequest( "nereid.pl", "/tracy/notes", 8099, [] ( int size, char* data ) {
                             std::string notes( data, data+size );
                             delete[] data;
-                            RunOnMainThread( [notes = std::move( notes )] { releaseNotes = std::move( notes ); tracy::s_wasActive = true; } );
+                            RunOnMainThread( [notes = std::move( notes )] () mutable { releaseNotes = std::move( notes ); tracy::s_wasActive = true; } );
                         } );
                     } );
                 }

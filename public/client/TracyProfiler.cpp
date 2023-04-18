@@ -1354,6 +1354,7 @@ Profiler::Profiler()
     , m_queryImage( nullptr )
     , m_queryData( nullptr )
     , m_crashHandlerInstalled( false )
+    , m_programName( nullptr )
 {
     assert( !s_instance );
     s_instance = this;
@@ -1718,6 +1719,9 @@ void Profiler::Worker()
             if( m_sock ) break;
 #ifndef TRACY_ON_DEMAND
             ProcessSysTime();
+#  ifdef TRACY_HAS_SYSPOWER
+            m_sysPower.Tick();
+#  endif
 #endif
 
             if( m_broadcast )
@@ -1725,6 +1729,14 @@ void Profiler::Worker()
                 const auto t = std::chrono::high_resolution_clock::now().time_since_epoch().count();
                 if( t - lastBroadcast > 3000000000 )  // 3s
                 {
+                    m_programNameLock.lock();
+                    if( m_programName )
+                    {
+                        broadcastMsg = GetBroadcastMessage( m_programName, strlen( m_programName ), broadcastLen, dataPort );
+                        m_programName = nullptr;
+                    }
+                    m_programNameLock.unlock();
+
                     lastBroadcast = t;
                     const auto ts = std::chrono::duration_cast<std::chrono::seconds>( std::chrono::system_clock::now().time_since_epoch() ).count();
                     broadcastMsg.activeTime = int32_t( ts - m_epoch );
@@ -1835,6 +1847,9 @@ void Profiler::Worker()
         for(;;)
         {
             ProcessSysTime();
+#ifdef TRACY_HAS_SYSPOWER
+            m_sysPower.Tick();
+#endif
             const auto status = Dequeue( token );
             const auto serialStatus = DequeueSerial();
             if( status == DequeueStatus::ConnectionLost || serialStatus == DequeueStatus::ConnectionLost )
@@ -4157,6 +4172,7 @@ TRACY_API void ___tracy_emit_frame_image( const void* image, uint16_t w, uint16_
 TRACY_API void ___tracy_emit_plot( const char* name, double val ) { tracy::Profiler::PlotData( name, val ); }
 TRACY_API void ___tracy_emit_plot_float( const char* name, float val ) { tracy::Profiler::PlotData( name, val ); }
 TRACY_API void ___tracy_emit_plot_int( const char* name, int64_t val ) { tracy::Profiler::PlotData( name, val ); }
+TRACY_API void ___tracy_emit_plot_config( const char* name, int type, int step, int fill, uint32_t color ) { tracy::Profiler::ConfigurePlot( name, tracy::PlotFormatType(type), step, fill, color ); }
 TRACY_API void ___tracy_emit_message( const char* txt, size_t size, int callstack ) { tracy::Profiler::Message( txt, size, callstack ); }
 TRACY_API void ___tracy_emit_messageL( const char* txt, int callstack ) { tracy::Profiler::Message( txt, callstack ); }
 TRACY_API void ___tracy_emit_messageC( const char* txt, size_t size, uint32_t color, int callstack ) { tracy::Profiler::MessageColor( txt, size, color, callstack ); }

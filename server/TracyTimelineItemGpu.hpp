@@ -24,10 +24,10 @@ protected:
     int64_t RangeEnd() const override;
 
     void HeaderTooltip( const char* label ) const override;
-    void HeaderExtraContents( int offset, const ImVec2& wpos, float labelWidth, double pxns, bool hover ) override;
-    void HeaderExtraPopupItems() override;
+    void HeaderExtraContents( const TimelineContext& ctx, int offset, float labelWidth ) override;
+	void HeaderExtraPopupItems() override;
 
-    bool DrawContents( double pxns, int& offset, const ImVec2& wpos, bool hover, float yMin, float yMax ) override;
+    bool DrawContents( const TimelineContext& ctx, int& offset ) override;
 
     bool IsEmpty() const override;
 

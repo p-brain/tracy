@@ -728,14 +728,17 @@ enum class PlotType : uint8_t
     User,
     Memory,
     SysTime,
-    Zone
+    Power,
+	Zone
 };
 
+// Keep this in sync with enum in TracyC.h
 enum class PlotValueFormatting : uint8_t
 {
     Number,
     Memory,
-    Percentage
+    Percentage,
+    Watt
 };
 
 struct PlotData
