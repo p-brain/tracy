@@ -293,12 +293,19 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
             const auto zsz = std::max( ( end - ev.Start() ) * pxns, pxns * 0.5 );
             const auto zoneColor = GetZoneColorData( ev, tid, v.depth );
             const char* zoneName = m_worker.GetZoneName( ev );
+			const auto ztime = m_worker.GetZoneEnd( ev ) - ev.Start();
 
             auto tsz = ImGui::CalcTextSize( zoneName );
             if( m_shortenName == ShortenName::Always || ( ( m_shortenName == ShortenName::NoSpace || m_shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) )
             {
                 zoneName = ShortenZoneName( m_shortenName, zoneName, tsz, zsz );
             }
+
+			// Add zone duration to the name
+			static char zoneNameTime[ 1024 ];
+			snprintf( zoneNameTime, 1024, "%s [%s]", zoneName, TimeToString( ztime ) );
+			zoneName = &zoneNameTime[ 0 ];
+			tsz = ImGui::CalcTextSize( zoneName );
 
             const auto pr0 = ( ev.Start() - m_vd.zvStart ) * pxns;
             const auto pr1 = ( end - m_vd.zvStart ) * pxns;
@@ -319,8 +326,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
             else
             {
                 const auto darkColor = DarkenColor( zoneColor.color );
-                DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px0, offset ), dpos + ImVec2( px1-1, offset ), zoneColor.accentColor, zoneColor.thickness );
-                DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px1-1, offset + tsz.y ), dpos + ImVec2( px1-1, offset ), darkColor, zoneColor.thickness );
+				draw->AddRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), darkColor, 0.f, -1, zoneColor.thickness );
             }
             if( dsz > MinVisSize )
             {
@@ -359,30 +365,38 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
                 DrawLine( draw, dpos + ImVec2( pr1 + rsz, offset + ty025 ), dpos + ImVec2( pr1 + rsz, offset + ty075 ), color );
                 DrawLine( draw, dpos + ImVec2( pr1 - rsz, offset + ty025 ), dpos + ImVec2( pr1 - rsz, offset + ty075 ), color );
             }
-            if( tsz.x < zsz )
-            {
-                const auto x = ( ev.Start() - m_vd.zvStart ) * pxns + ( ( end - ev.Start() ) * pxns - tsz.x ) / 2;
-                if( x < 0 || x > w - tsz.x )
-                {
-                    ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                    DrawTextContrast( draw, wpos + ImVec2( std::max( std::max( 0., px0 ), std::min( double( w - tsz.x ), x ) ), offset ), 0xFFFFFFFF, zoneName );
-                    ImGui::PopClipRect();
-                }
-                else if( ev.Start() == ev.End() )
-                {
-                    DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
-                }
-                else
-                {
-                    DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFFFFFFFF, zoneName );
-                }
-            }
-            else
-            {
-                ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                DrawTextContrast( draw, wpos + ImVec2( std::max( int64_t( 0 ), ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
-                ImGui::PopClipRect();
-            }
+
+			const float zonePaddingPx = 10.0f;
+			const float minTextSizePx = 20.0f;
+			const float minZoneSizePx = ( zonePaddingPx * 2.0f ) + minTextSizePx;
+			if ( zsz > minZoneSizePx )
+			{
+				ImVec2 vPadding = ImVec2( zonePaddingPx, 0.0f );
+				if ( tsz.x < ( zsz - ( zonePaddingPx * 2.0f ) ) )
+				{
+					const auto x = ( ev.Start() - m_vd.zvStart ) * pxns + ( ( end - ev.Start() ) * pxns - tsz.x ) / 2;
+					if ( x < zonePaddingPx || x > w - tsz.x )
+					{
+						ImGui::PushClipRect( wpos + vPadding + ImVec2( px0, offset ), wpos - vPadding + ImVec2( px1, offset + tsz.y * 2 ), true );
+						DrawTextContrast( draw, wpos + ImVec2( std::max( std::max( double( zonePaddingPx ), px0 ), std::min( double( w - tsz.x ), x ) ), offset ), 0xFFFFFFFF, zoneName );
+						ImGui::PopClipRect();
+					}
+					else if ( ev.Start() == ev.End() )
+					{
+						DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
+					}
+					else
+					{
+						DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFFFFFFFF, zoneName );
+					}
+				}
+				else
+				{
+					ImGui::PushClipRect( wpos + vPadding + ImVec2( px0, offset ), wpos - vPadding + ImVec2( px1, offset + tsz.y * 2 ), true );
+					DrawTextContrast( draw, wpos + vPadding + ImVec2( std::max( int64_t( 0 ), ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
+					ImGui::PopClipRect();
+				}
+			}
 
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
             {
