@@ -158,7 +158,7 @@ void View::DrawFrames()
                 ImGui::BeginTooltip();
                 if( group > 1 )
                 {
-                    const auto fnum = GetFrameNumber( *m_frames, sel, m_worker.GetFrameOffset() );
+                    const auto fnum = GetFrameNumber( *m_frames, sel );
                     auto f = m_worker.GetFrameTime( *m_frames, sel );
                     auto g = std::min( group, total - sel );
                     for( int j=1; j<g; j++ )
