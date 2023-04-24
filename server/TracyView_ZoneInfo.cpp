@@ -9,6 +9,7 @@
 namespace tracy
 {
 
+extern bool g_bAutoZoneStats;
 extern double s_time;
 
 template<typename T>
@@ -292,25 +293,17 @@ void View::DrawZoneInfoWindow()
     auto& ev = *m_zoneInfoWindow;
 
     const auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
-
-    const auto scale = GetScale();
+	const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 500 * scale, 600 * scale ), ImGuiCond_FirstUseEver );
+
     bool show = true;
     ImGui::Begin( "Zone info", &show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( !ImGui::GetCurrentWindowRead()->SkipItems )
     {
+		ImGui::SameLine();
         if( ImGui::Button( ICON_FA_MICROSCOPE " Zoom to zone" ) )
         {
             ZoomToZone( ev );
-        }
-        auto parent = GetZoneParent( ev );
-        if( parent )
-        {
-            ImGui::SameLine();
-            if( ImGui::Button( ICON_FA_ARROW_UP " Go to parent" ) )
-            {
-                ShowZoneInfo( *parent );
-            }
         }
 #ifndef TRACY_NO_STATISTICS
         if( m_worker.AreSourceLocationZonesReady() )
@@ -319,15 +312,41 @@ void View::DrawZoneInfoWindow()
             const auto& slz = m_worker.GetZonesForSourceLocation( sl );
             if( !slz.zones.empty() )
             {
+				ImGui::SameLine();
+				ImGui::Checkbox( "AutoStats", &tracy::g_bAutoZoneStats );
+
                 static int16_t sOldSrcLoc = -1;
-                if ( sOldSrcLoc != sl )
-                {
-                    m_findZone.ShowZone( sl, m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
-                    sOldSrcLoc = sl;
-                }
+				ImGui::SameLine();
+				if ( ImGui::Button( ICON_FA_CHART_BAR " Statistics" ) )
+				{
+					m_findZone.ShowZone( sl, m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+					sOldSrcLoc = -1;
+				}
+				
+				if ( tracy::g_bAutoZoneStats )
+				{
+  					if ( sOldSrcLoc != sl )
+					{
+						m_findZone.ShowZone( sl, m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+						sOldSrcLoc = sl;
+					}
+				}
             }
         }
+		
 #endif
+		auto parent = GetZoneParent( ev );
+		if ( parent )
+		{
+			ImGui::SameLine();
+			if ( ImGui::Button( ICON_FA_ARROW_UP " Go to parent" ) )
+			{
+				ShowZoneInfo( *parent );
+			}
+		}
+
+		ImGui::NewLine();
+
         if( m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).callstack.Val() != 0 )
         {
             const auto& extra = m_worker.GetZoneExtra( ev );

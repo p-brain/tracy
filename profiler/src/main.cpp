@@ -113,7 +113,7 @@ namespace tracy
 {
 	std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
 	bool g_bReApplyThreadOrder = false;
-	bool g_bAutoFindZone = false;
+	bool g_bAutoZoneStats = true;
 }
 static uint8_t* iconPx;
 static int iconX, iconY;
@@ -243,6 +243,12 @@ int main( int argc, char** argv )
                 {
                     tracy::g_MapThreadNameToPriority[ iter->name.GetString() ] = iter->value.GetInt();
                 }
+			}
+
+			if ( d.HasMember( "AutoZoneStats" ) )
+			{
+				const Value &rAutoZoneStats = d[ "AutoZoneStats" ];
+				tracy::g_bAutoZoneStats = rAutoZoneStats.GetBool();
             }
 
             fclose( f );
@@ -344,7 +350,8 @@ int main( int argc, char** argv )
 
                 // Write out other options
                 
-
+				Value autoStats( tracy::g_bAutoZoneStats ? kTrueType : kFalseType );
+				d.AddMember( "AutoZoneStats", autoStats, d.GetAllocator() );
 
                 // Pretty write file
 
