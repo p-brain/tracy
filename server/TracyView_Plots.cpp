@@ -32,12 +32,7 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
         auto min = plot.rMin;
         auto max = plot.rMax;
 
-		if (plot.type == PlotType::Zone)
-		{
-			max = (double)m_vd.plotsMaxTimeMS;
-			min = 0.0;
-		}
-		        auto pvit = m_plotView.find( &plot );
+        auto pvit = m_plotView.find( &plot );
         if( pvit == m_plotView.end() )
         {
             pvit = m_plotView.emplace( &plot, PlotView { min, max } ).first;
@@ -62,7 +57,11 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             max = pv.max;
         }
 
-
+		if ( plot.type == PlotType::Zone )
+		{
+			max = ( double ) m_vd.plotsMaxTimeMS;
+			min = 0.0;
+		}
 
         const auto color = GetPlotColor( plot, m_worker );
         const auto bg = 0x22000000 | ( DarkenColorMore( color ) & 0xFFFFFF );
@@ -184,10 +183,10 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             }
         }
 
-        auto tmp = FormatPlotValue( plot.rMax, plot.format );
+        auto tmp = FormatPlotValue( max, plot.format );
         DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
         offset += PlotHeight - ty;
-        tmp = FormatPlotValue( plot.rMin, plot.format );
+        tmp = FormatPlotValue( min, plot.format );
         DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
 
         DrawLine( draw, dpos + ImVec2( 0, offset + ty - 1 ), dpos + ImVec2( w, offset + ty - 1 ), 0xFF226E6E );
