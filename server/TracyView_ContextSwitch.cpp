@@ -143,7 +143,7 @@ void View::DrawContextSwitchList( const TimelineContext& ctx, const std::vector<
     const auto pxns = ctx.pxns;
     const auto hover = ctx.hover;
     const auto w = ctx.w;
-    const auto ty = ctx.ty;
+    const auto ty = round( ctx.ty * 0.75f );
 
     const auto lineSize = 2 * GetScale();
     auto draw = ImGui::GetWindowDrawList();
@@ -294,7 +294,7 @@ void View::DrawContextSwitchList( const TimelineContext& ctx, const std::vector<
             }
             else
             {
-                DrawZigZag( draw, wpos + ImVec2( 0, offset + ty05 ), px0, minpx, ty/4, 0xFF888888, 1.5 );
+                DrawZigZag( draw, wpos + ImVec2( 0, offset + ty05 ), px0, minpx, ty/4, 0xFF888888 );
                 if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( minpx, offset + ty + 1 ) ) )
                 {
                     ImGui::BeginTooltip();

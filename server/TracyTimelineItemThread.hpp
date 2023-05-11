@@ -2,8 +2,8 @@
 #define __TRACYTIMELINEITEMTHREAD_HPP__
 
 #include "TracyEvent.hpp"
-#include "TracyTimelineItem.hpp"
 #include "TracyTimelineDraw.hpp"
+#include "TracyTimelineItem.hpp"
 
 namespace tracy
 {
@@ -45,7 +45,7 @@ private:
     void PreprocessContextSwitches( const TimelineContext& ctx, const ContextSwitch& ctxSwitch, bool visible );
     void PreprocessSamples( const TimelineContext& ctx, const Vector<SampleData>& vec, bool visible, int yPos );
     void PreprocessMessages( const TimelineContext& ctx, const Vector<short_ptr<MessageData>>& vec, uint64_t tid, bool visible, int yPos );
-    void PreprocessLocks( const TimelineContext& ctx, const unordered_flat_map<uint32_t, LockMap*>& locks, uint32_t tid, TaskDispatch& td, bool visible, int yPos );
+    void PreprocessLocks( const TimelineContext& ctx, const unordered_flat_map<uint32_t, LockMap*>& locks, uint32_t tid, TaskDispatch& td, bool visible );
 
     const ThreadData* m_thread;
     bool m_ghost;

@@ -2316,12 +2316,12 @@ const uint64_t* Worker::GetInlineSymbolList( uint64_t sym, uint32_t len )
     return it;
 }
 
-int64_t Worker::GetZoneEnd( const ZoneEvent& ev )
+int64_t Worker::GetZoneEndImpl( const ZoneEvent& ev )
 {
+    assert( !ev.IsEndValid() );
     auto ptr = &ev;
     for(;;)
     {
-        if( ptr->IsEndValid() ) return ptr->End();
         if( !ptr->HasChildren() ) return ptr->Start();
         auto& children = GetZoneChildren( ptr->Child() );
         if( children.is_magic() )
@@ -2333,15 +2333,16 @@ int64_t Worker::GetZoneEnd( const ZoneEvent& ev )
         {
             ptr = children.back();
         }
+        if( ptr->IsEndValid() ) return ptr->End();
     }
 }
 
-int64_t Worker::GetZoneEnd( const GpuEvent& ev )
+int64_t Worker::GetZoneEndImpl( const GpuEvent& ev )
 {
+    assert( ev.GpuEnd() < 0 );
     auto ptr = &ev;
     for(;;)
     {
-        if( ptr->GpuEnd() >= 0 ) return ptr->GpuEnd();
         if( ptr->Child() < 0 ) return ptr->GpuStart() >= 0 ? ptr->GpuStart() : m_data.lastTime;
         auto& children = GetGpuChildren( ptr->Child() );
         if( children.is_magic() )
@@ -2353,6 +2354,7 @@ int64_t Worker::GetZoneEnd( const GpuEvent& ev )
         {
             ptr = children.back();
         }
+        if( ptr->GpuEnd() >= 0 ) return ptr->GpuEnd();
     }
 }
 
@@ -7155,7 +7157,8 @@ void Worker::ReconstructContextSwitchUsage()
             {
                 const auto ct = !cpus[i].startDone ? cpus[i].it->Start() : cpus[i].it->End();
                 if( nextTime != ct ) break;
-                const auto isOwn = GetPidFromTid( DecompressThreadExternal( cpus[i].it->Thread() ) ) == m_pid;
+                const auto tid = DecompressThreadExternal( cpus[i].it->Thread() );
+                const auto isOwn = IsThreadLocal( tid ) || GetPidFromTid( tid ) == m_pid;
                 if( !cpus[i].startDone )
                 {
                     if( isOwn )
@@ -7171,7 +7174,7 @@ void Worker::ReconstructContextSwitchUsage()
                     if( !cpus[i].it->IsEndValid() )
                     {
                         cpus[i].it++;
-                        assert( cpus[i].it = cpus[i].end );
+                        assert( cpus[i].it == cpus[i].end );
                     }
                     else
                     {
