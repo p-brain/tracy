@@ -3,8 +3,10 @@
 #endif
 
 #ifdef _WIN32
-#   include <malloc.h>
-#   include "./../profiler/src/GetMainWindowHandle.h"
+#  include <malloc.h>
+#  include "./../profiler/src/GetMainWindowHandle.h"
+#elif defined __FreeBSD__
+#  include <stdlib.h>
 #else
 #  include <alloca.h>
 #endif

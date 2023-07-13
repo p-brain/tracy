@@ -101,6 +101,7 @@ set(client_includes
     ${TRACY_PUBLIC_DIR}/client/TracyArmCpuTable.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyCallstack.h
     ${TRACY_PUBLIC_DIR}/client/TracyCallstack.hpp
+    ${TRACY_PUBLIC_DIR}/client/TracyCpuid.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyDebug.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyDxt1.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyFastVector.hpp
@@ -109,6 +110,7 @@ set(client_includes
     ${TRACY_PUBLIC_DIR}/client/TracyRingBuffer.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyScoped.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyStringHelpers.hpp
+    ${TRACY_PUBLIC_DIR}/client/TracySysPower.hpp
     ${TRACY_PUBLIC_DIR}/client/TracySysTime.hpp
     ${TRACY_PUBLIC_DIR}/client/TracySysTrace.hpp
     ${TRACY_PUBLIC_DIR}/client/TracyThread.hpp)
@@ -143,5 +145,11 @@ install(FILES ${common_includes}
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/common)
 install(EXPORT TracyConfig
         NAMESPACE Tracy::
-        FILE TracyConfig.cmake
+        FILE TracyTargets.cmake
+        DESTINATION share/Tracy)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
+        "${CMAKE_CURRENT_BINARY_DIR}/TracyConfig.cmake"
+        INSTALL_DESTINATION share/Tracy)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/TracyConfig.cmake
         DESTINATION share/Tracy)
