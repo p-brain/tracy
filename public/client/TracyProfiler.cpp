@@ -84,7 +84,9 @@
 #endif
 
 #ifdef __APPLE__
-#  define TRACY_DELAYED_INIT
+#  ifndef TRACY_DELAYED_INIT
+#    define TRACY_DELAYED_INIT
+#  endif
 #else
 #  ifdef __GNUC__
 #    define init_order( val ) __attribute__ ((init_priority(val)))
@@ -1073,7 +1075,9 @@ static void CrashHandler( int signal, siginfo_t* info, void* /*ucontext*/ )
     }
     closedir( dp );
 
+#ifdef TRACY_HAS_CALLSTACK
     if( selfTid == s_symbolTid ) s_symbolThreadGone.store( true, std::memory_order_release );
+#endif
 
     TracyLfqPrepare( QueueType::Crash );
     TracyLfqCommit;
@@ -1139,12 +1143,14 @@ thread_local bool RpThreadShutdown = false;
 #  ifdef TRACY_MANUAL_LIFETIME
 ProfilerData* s_profilerData = nullptr;
 static ProfilerThreadData& GetProfilerThreadData();
+static std::atomic<bool> s_isProfilerStarted { false };
 TRACY_API void StartupProfiler()
 {
     s_profilerData = (ProfilerData*)tracy_malloc( sizeof( ProfilerData ) );
     new (s_profilerData) ProfilerData();
     s_profilerData->profiler.SpawnWorkerThreads();
     GetProfilerThreadData().token = ProducerWrapper( *s_profilerData );
+    s_isProfilerStarted.store( true, std::memory_order_seq_cst );
 }
 static ProfilerData& GetProfilerData()
 {
@@ -1153,12 +1159,17 @@ static ProfilerData& GetProfilerData()
 }
 TRACY_API void ShutdownProfiler()
 {
+    s_isProfilerStarted.store( false, std::memory_order_seq_cst );
     s_profilerData->~ProfilerData();
     tracy_free( s_profilerData );
     s_profilerData = nullptr;
     rpmalloc_finalize();
     RpThreadInitDone = false;
     RpInitDone.store( 0, std::memory_order_release );
+}
+TRACY_API bool IsProfilerStarted()
+{
+    return s_isProfilerStarted.load( std::memory_order_seq_cst );
 }
 #  else
 static std::atomic<int> profilerDataLock { 0 };
@@ -4262,6 +4273,11 @@ TRACY_API void ___tracy_emit_gpu_new_context( ___tracy_gpu_new_context_data data
     tracy::MemWrite( &item->gpuNewContext.context, data.context );
     tracy::MemWrite( &item->gpuNewContext.flags, data.flags );
     tracy::MemWrite( &item->gpuNewContext.type, data.type );
+
+#ifdef TRACY_ON_DEMAND
+    tracy::GetProfiler().DeferItem( *item );
+#endif
+
     TracyLfqCommitC;
 }
 
@@ -4274,6 +4290,11 @@ TRACY_API void ___tracy_emit_gpu_context_name( const struct ___tracy_gpu_context
     tracy::MemWrite( &item->gpuContextNameFat.context, data.context );
     tracy::MemWrite( &item->gpuContextNameFat.ptr, (uint64_t)ptr );
     tracy::MemWrite( &item->gpuContextNameFat.size, data.len );
+
+#ifdef TRACY_ON_DEMAND
+    tracy::GetProfiler().DeferItem( *item );
+#endif
+
     TracyLfqCommitC;
 }
 
@@ -4284,6 +4305,15 @@ TRACY_API void ___tracy_emit_gpu_calibration( const struct ___tracy_gpu_calibrat
     tracy::MemWrite( &item->gpuCalibration.gpuTime, data.gpuTime );
     tracy::MemWrite( &item->gpuCalibration.cpuDelta, data.cpuDelta );
     tracy::MemWrite( &item->gpuCalibration.context, data.context );
+    TracyLfqCommitC;
+}
+
+TRACY_API void ___tracy_emit_gpu_time_sync( const struct ___tracy_gpu_time_sync_data data )
+{
+    TracyLfqPrepareC( tracy::QueueType::GpuTimeSync );
+    tracy::MemWrite( &item->gpuTimeSync.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuTimeSync.gpuTime, data.gpuTime );
+    tracy::MemWrite( &item->gpuTimeSync.context, data.context );
     TracyLfqCommitC;
 }
 
@@ -4402,6 +4432,16 @@ TRACY_API void ___tracy_emit_gpu_calibration_serial( const struct ___tracy_gpu_c
     tracy::Profiler::QueueSerialFinish();
 }
 
+TRACY_API void ___tracy_emit_gpu_time_sync_serial( const struct ___tracy_gpu_time_sync_data data )
+{
+    auto item = tracy::Profiler::QueueSerial();
+    tracy::MemWrite( &item->hdr.type, tracy::QueueType::GpuTimeSync );
+    tracy::MemWrite( &item->gpuTimeSync.cpuTime, tracy::Profiler::GetTime() );
+    tracy::MemWrite( &item->gpuTimeSync.gpuTime, data.gpuTime );
+    tracy::MemWrite( &item->gpuTimeSync.context, data.context );
+    tracy::Profiler::QueueSerialFinish();
+}
+
 TRACY_API int ___tracy_connected( void )
 {
     return tracy::GetProfiler().IsConnected();
@@ -4421,6 +4461,11 @@ TRACY_API void ___tracy_startup_profiler( void )
 TRACY_API void ___tracy_shutdown_profiler( void )
 {
     tracy::ShutdownProfiler();
+}
+
+TRACY_API int ___tracy_profiler_started( void )
+{
+    return tracy::s_isProfilerStarted.load( std::memory_order_seq_cst );
 }
 #  endif
 

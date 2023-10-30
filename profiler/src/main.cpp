@@ -160,6 +160,13 @@ static void SetupDPIScale( float scale, ImFont*& cb_fixedWidth, ImFont*& cb_bigF
 {
     LoadFonts( scale, cb_fixedWidth, cb_bigFont, cb_smallFont );
 
+#ifdef __APPLE__
+    // No need to upscale the style on macOS, but we need to downscale the fonts.
+    ImGuiIO& io = ImGui::GetIO();
+    io.FontGlobalScale = 1.0f / dpiScale;
+    scale = 1.0f;
+#endif
+
     auto& style = ImGui::GetStyle();
     style = ImGuiStyle();
     ImGui::StyleColorsDark();
@@ -668,7 +675,7 @@ static void DrawContents()
                 ImGui::Indent();
                 if( ImGui::RadioButton( "Enabled", s_config.threadedRendering ) ) { s_config.threadedRendering = true; SaveConfig(); }
                 ImGui::SameLine();
-                tracy::DrawHelpMarker( "Uses all available CPU cores for rendering. May affect performance of the profiled application when running on the same machine." );
+                tracy::DrawHelpMarker( "Uses multiple CPU cores for rendering. May affect performance of the profiled application when running on the same machine." );
                 if( ImGui::RadioButton( "Disabled", !s_config.threadedRendering ) ) { s_config.threadedRendering = false; SaveConfig(); }
                 ImGui::SameLine();
                 tracy::DrawHelpMarker( "Restricts rendering to a single CPU core. Can reduce profiler frame rate." );
