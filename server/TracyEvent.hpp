@@ -550,6 +550,8 @@ struct ContextSwitchData
     tracy_force_inline void SetState( int8_t state ) { memcpy( &_end_reason_state, &state, 1 ); }
     tracy_force_inline int64_t WakeupVal() const { return _wakeup.Val(); }
     tracy_force_inline void SetWakeup( int64_t wakeup ) { assert( wakeup < (int64_t)( 1ull << 47 ) ); _wakeup.SetVal( wakeup ); }
+	tracy_force_inline uint8_t WakeupCpu() const { return _wakeupCpu; }
+	tracy_force_inline void SetWakeupCpu( uint8_t wakeupCpu ) { _wakeupCpu = wakeupCpu; }
     tracy_force_inline uint16_t Thread() const { return _thread; }
     tracy_force_inline void SetThread( uint16_t thread ) { _thread = thread; }
 
@@ -560,6 +562,7 @@ struct ContextSwitchData
     uint64_t _end_reason_state;
     Int48 _wakeup;
     uint16_t _thread;
+	uint8_t _wakeupCpu;
 };
 
 enum { ContextSwitchDataSize = sizeof( ContextSwitchData ) };
@@ -577,8 +580,15 @@ struct ContextSwitchCpu
 
     tracy_force_inline void SetStartThread( int64_t start, uint16_t thread ) { assert( start < (int64_t)( 1ull << 47 ) ); _start_thread = ( uint64_t( start ) << 16 ) | thread; }
 
+	tracy_force_inline int64_t WakeupVal() const { return _wakeup.Val(); }
+	tracy_force_inline void SetWakeup( int64_t wakeup ) { assert( wakeup < ( int64_t ) ( 1ull << 47 ) ); _wakeup.SetVal( wakeup ); }
+	tracy_force_inline uint8_t WakeupCpu() const { return _wakeupCpu; }
+	tracy_force_inline void SetWakeupCpu( uint8_t wakeupCpu ) { _wakeupCpu = wakeupCpu; }
+
     uint64_t _start_thread;
     Int48 _end;
+	uint8_t _wakeupCpu;
+	Int48 _wakeup;
 };
 
 enum { ContextSwitchCpuSize = sizeof( ContextSwitchCpu ) };

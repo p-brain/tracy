@@ -1419,9 +1419,9 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
             for( uint64_t j=0; j<csz; j++ )
             {
                 int64_t deltaWakeup, deltaStart, diff, thread;
-                uint8_t cpu;
+                uint8_t wakeupCpu, cpu;
                 int8_t reason, state;
-                f.Read7( deltaWakeup, deltaStart, diff, cpu, reason, state, thread );
+                f.Read8( deltaWakeup, deltaStart, diff, wakeupCpu, cpu, reason, state, thread );
                 refTime += deltaWakeup;
                 ptr->SetWakeup( refTime );
                 refTime += deltaStart;
@@ -1430,6 +1430,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
                 refTime += diff;
                 ptr->SetEndReasonState( refTime, reason, state );
                 ptr->SetThread( CompressThread( thread ) );
+				ptr->SetWakeupCpu( wakeupCpu );
                 ptr++;
             }
             data->runningTime = runningTime;
@@ -1446,7 +1447,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
             f.Skip( sizeof( uint64_t ) );
             uint64_t csz;
             f.Read( csz );
-            f.Skip( csz * ( sizeof( int64_t ) * 4 + sizeof( int8_t ) * 3 ) );
+            f.Skip( csz * ( sizeof( int64_t ) * 4 + sizeof( int8_t ) * 4 ) );
         }
     }
 
@@ -1468,13 +1469,17 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
                 auto ptr = m_data.cpuData[i].cs.data();
                 for( uint64_t j=0; j<sz; j++ )
                 {
-                    int64_t deltaStart, deltaEnd;
+                    int64_t deltaWakeup, deltaStart, deltaEnd;
                     uint16_t thread;
-                    f.Read3( deltaStart, deltaEnd, thread );
+					uint8_t wakeupCpu;
+                    f.Read5( deltaWakeup, deltaStart, deltaEnd, thread, wakeupCpu );
+					refTime += deltaWakeup;
+					ptr->SetWakeup( refTime );
                     refTime += deltaStart;
                     ptr->SetStartThread( refTime, thread );
                     refTime += deltaEnd;
                     ptr->SetEnd( refTime );
+					ptr->SetWakeupCpu( wakeupCpu );
                     ptr++;
                 }
                 cnt += sz;
@@ -1487,7 +1492,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
         for( int i=0; i<256; i++ )
         {
             f.Read( sz );
-            f.Skip( sz * ( sizeof( int64_t ) * 2 + sizeof( uint16_t ) ) );
+            f.Skip( sz * ( sizeof( int64_t ) * 3 + sizeof( uint16_t ) + +sizeof( uint8_t ) ) );
         }
     }
 
@@ -6773,6 +6778,7 @@ void Worker::ProcessContextSwitch( const QueueContextSwitch& ev )
         auto& data = it->second->v;
         ContextSwitchData* item = nullptr;
         bool migration = false;
+		int64_t wakeupTime = -1;
         if( !data.empty() && data.back().Reason() == ContextSwitchData::Wakeup )
         {
             item = &data.back();
@@ -6780,6 +6786,7 @@ void Worker::ProcessContextSwitch( const QueueContextSwitch& ev )
             {
                 migration = data[data.size()-2].Cpu() != ev.cpu;
             }
+			wakeupTime = item->WakeupVal();
         }
         else
         {
@@ -6790,6 +6797,7 @@ void Worker::ProcessContextSwitch( const QueueContextSwitch& ev )
             }
             item = &data.push_next();
             item->SetWakeup( time );
+			item->SetWakeupCpu( 0 );
         }
         item->SetStart( time );
         item->SetEnd( -1 );
@@ -6802,6 +6810,8 @@ void Worker::ProcessContextSwitch( const QueueContextSwitch& ev )
         cx.SetStart( time );
         cx.SetEnd( -1 );
         cx.SetThread( m_data.externalThreadCompress.CompressThread( ev.newThread ) );
+		cx.SetWakeup( wakeupTime );
+		cx.SetWakeupCpu( item->WakeupCpu() );
 
         CheckExternalName( ev.newThread );
 
@@ -6832,6 +6842,7 @@ void Worker::ProcessThreadWakeup( const QueueThreadWakeup& ev )
     if( !data.empty() && !data.back().IsEndValid() ) return;        // wakeup of a running thread
     auto& item = data.push_next();
     item.SetWakeup( time );
+	item.SetWakeupCpu( ev.readyingCpu );
     item.SetStart( time );
     item.SetEnd( -1 );
     item.SetCpu( 0 );
@@ -8197,10 +8208,12 @@ void Worker::Write( FileWrite& f, bool fiDict )
             WriteTimeOffset( f, refTime, cs.WakeupVal() );
             WriteTimeOffset( f, refTime, cs.Start() );
             WriteTimeOffset( f, refTime, cs.End() );
-            uint8_t cpu = cs.Cpu();
+			uint8_t wakeupCpu = cs.WakeupCpu();
+			uint8_t cpu = cs.Cpu();
             int8_t reason = cs.Reason();
             int8_t state = cs.State();
             uint64_t thread = DecompressThread( cs.Thread() );
+			f.Write( &wakeupCpu, sizeof( wakeupCpu ) );
             f.Write( &cpu, sizeof( cpu ) );
             f.Write( &reason, sizeof( reason ) );
             f.Write( &state, sizeof( state ) );
@@ -8217,10 +8230,13 @@ void Worker::Write( FileWrite& f, bool fiDict )
         int64_t refTime = 0;
         for( auto& cx : m_data.cpuData[i].cs )
         {
-            WriteTimeOffset( f, refTime, cx.Start() );
+			WriteTimeOffset( f, refTime, cx.WakeupVal() );
+			WriteTimeOffset( f, refTime, cx.Start() );
             WriteTimeOffset( f, refTime, cx.End() );
             uint16_t thread = cx.Thread();
+			uint8_t wakeupCpu = cx.WakeupCpu();
             f.Write( &thread, sizeof( thread ) );
+			f.Write( &wakeupCpu, sizeof( wakeupCpu ) );
         }
     }
 

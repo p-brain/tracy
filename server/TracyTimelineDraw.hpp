@@ -39,6 +39,7 @@ struct ContextSwitchDraw
     ContextSwitchDrawType type;
     uint32_t idx;
     uint32_t data;                  // Folded: number of items -OR- Waiting: wait stack
+	uint32_t readyingStack;			// only valid in 'Waiting' case
 };
 
 

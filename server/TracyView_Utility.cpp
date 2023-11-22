@@ -896,4 +896,21 @@ void View::UpdateTitle()
     }
 }
 
+const ThreadData *View::GetThreadDataForCpu( uint8_t cpu, int64_t time )
+{
+	const auto cpuData = m_worker.GetCpuData();
+	const auto cpuCnt = m_worker.GetCpuDataCpuCount();
+	if ( ( cpu < cpuCnt ) && !cpuData[ cpu ].cs.empty() )
+	{
+		auto &cs = cpuData[ cpu ].cs;
+		auto it = std::lower_bound( cs.begin(), cs.end(), time, [] ( const auto &l, const auto &r ) { return ( uint64_t ) l.End() < ( uint64_t ) r; } );
+		if ( it != cs.end() && it->Start() <= time && it->End() >= time )
+		{
+			return m_worker.GetThreadData( m_worker.DecompressThreadExternal( it->Thread() ) );
+		}
+	}
+
+	return nullptr;
+}
+
 }

@@ -6,6 +6,7 @@
 #include "TracyTimelineContext.hpp"
 #include "TracyTimelineDraw.hpp"
 #include "TracyView.hpp"
+#include "TracyColor.hpp"
 
 namespace tracy
 {
@@ -225,8 +226,8 @@ void View::DrawContextSwitchList( const TimelineContext& ctx, const std::vector<
                     }
                 }
                 else if( ev.WakeupVal() != ev.Start() && ImGui::IsMouseHoveringRect( wpos + ImVec2( pxw, offset ), wpos + ImVec2( px1, offset + ty ) ) )
-                {
-                    assert( !isFiber );
+                {					
+					assert( !isFiber );
                     ImGui::BeginTooltip();
                     TextFocused( "Thread is", "waking up" );
                     TextFocused( "Scheduling delay:", TimeToString( ev.Start() - ev.WakeupVal() ) );
@@ -239,17 +240,77 @@ void View::DrawContextSwitchList( const TimelineContext& ctx, const std::vector<
                 }
                 if( tooltip )
                 {
-                    const auto waitStack = v.data;
-                    if( waitStack )
+					if ( ev.WakeupVal() != ev.Start() )
+					{
+						uint8_t wakeupCpu = ev.WakeupCpu();
+						TextFocused( "Readying CPU:", RealToString( wakeupCpu ) );
+
+						const ThreadData *pThreadData = GetThreadDataForCpu( wakeupCpu, ev.WakeupVal() );
+						if ( pThreadData )
+						{
+							TextDisabledUnformatted( "Readying thread:" );
+							ImGui::SameLine();
+
+							const auto thread = pThreadData->id;
+							bool local, untracked;
+							const char *txt;
+							auto label = GetThreadContextData( thread, local, untracked, txt );
+							if ( local || untracked )
+							{
+								uint32_t color;
+								if ( m_vd.dynamicColors != 0 )
+								{
+									color = local ? GetThreadColor( thread, 0 ) : ( untracked ? 0xFF663333 : 0xFF444444 );
+								}
+								else
+								{
+									color = local ? 0xFF334488 : ( untracked ? 0xFF663333 : 0xFF444444 );
+								}
+								TextColoredUnformatted( HighlightColor<75>( color ), label );
+								ImGui::SameLine();
+								ImGui::TextDisabled( "(%s)", RealToString( thread ) );
+							}
+							else
+							{
+								TextDisabledUnformatted( label );
+							}
+						}
+					}
+					
+					const auto waitStack = v.data;
+					const auto readyingStack = v.readyingStack;
+					if ( waitStack || readyingStack )
+					{
+						ImGui::Separator();
+					}
+					
+					if( waitStack )
                     {
-                            ImGui::Separator();
-                            TextDisabledUnformatted( ICON_FA_HOURGLASS_HALF " Wait stack:" );
-                            CallstackTooltipContents( waitStack );
-                            if( ImGui::IsMouseClicked( 0 ) )
-                            {
-                                m_callstackInfoWindow = waitStack;
-                            }
+						ImGui::BeginGroup();
+                        TextDisabledUnformatted( ICON_FA_HOURGLASS_HALF " Wait stack:" );
+                        CallstackTooltipContents( waitStack );
+                        if( ImGui::IsMouseClicked( 0 ) )
+                        {
+                            m_callstackInfoWindow = waitStack;
+                        }
+						ImGui::EndGroup();
+						if ( readyingStack )
+						{
+							ImGui::SameLine();
+						}
                     }
+
+					if ( readyingStack )
+					{
+						ImGui::BeginGroup();
+						TextDisabledUnformatted( ICON_FA_DIAGRAM_PREDECESSOR " Readying stack:" );
+						CallstackTooltipContents( readyingStack );
+						if ( ImGui::IsMouseClicked( 1 ) )
+						{
+							m_callstackInfoWindow = readyingStack;
+						}
+						ImGui::EndGroup();
+					}
                     ImGui::EndTooltip();
                 }
             }
