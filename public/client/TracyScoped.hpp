@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdint.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include "../common/TracySystem.hpp"
 #include "../common/TracyAlign.hpp"
@@ -135,6 +136,30 @@ public:
         MemWrite( &item->zoneTextFat.size, (uint16_t)size );
         TracyQueueCommit( zoneTextFatThread );
     }
+
+	void NameFmt( const char *pFormat, ... )
+	{
+		//if ( !m_active ) return;  // check done outside !!!
+#ifdef TRACY_ON_DEMAND
+		if ( GetProfiler().ConnectionId() != m_connectionId ) return;
+#endif
+
+		const size_t nBufSize = 256;
+		char *pBuf = ( char * ) tracy_malloc( nBufSize );
+		
+		va_list params;
+		va_start( params, pFormat );
+		int size = vsnprintf( pBuf, nBufSize, pFormat, params );
+		va_end( params );
+
+
+		assert( size < ( std::numeric_limits<uint16_t>::max )( ) );
+
+		TracyQueuePrepare( QueueType::ZoneName );
+		MemWrite( &item->zoneTextFat.text, ( uint64_t ) pBuf );
+		MemWrite( &item->zoneTextFat.size, ( uint16_t ) size );
+		TracyQueueCommit( zoneTextFatThread );
+	}
 
     tracy_force_inline void Color( uint32_t color )
     {

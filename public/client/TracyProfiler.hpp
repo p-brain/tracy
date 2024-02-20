@@ -57,6 +57,13 @@ TRACY_API bool IsProfilerStarted();
 #  define TracyIsStarted true
 #endif
 
+// Profiled programs will not automatically broadcast their presence to Tracy and 
+// not automatically listen for incoming connections. This is to stop having firewall
+// permissions popups when launching any tracy enabled programs.
+// This process is now manual by calling the function below or adding '-tracy_enable' 
+// to the command line
+TRACY_API void RequestListenAndBroadcast();
+
 class GpuCtx;
 class Profiler;
 class Socket;
@@ -188,6 +195,8 @@ class Profiler
 public:
     Profiler();
     ~Profiler();
+
+	void RequestListenAndBroadcast() { m_listenAndBroadcastRequested.store( true, std::memory_order_relaxed ); }
 
     void SpawnWorkerThreads();
 
@@ -717,6 +726,11 @@ public:
         m_programNameLock.unlock();
     }
 
+	tracy_force_inline uint32_t ListenPort() const
+	{
+		return m_listenPort;
+	}
+
 #ifdef TRACY_ON_DEMAND
     tracy_force_inline uint64_t ConnectionId() const
     {
@@ -930,6 +944,7 @@ private:
     uint64_t m_resolution;
     uint64_t m_delay;
     std::atomic<int64_t> m_timeBegin;
+	std::atomic<bool> m_listenAndBroadcastRequested;
     uint32_t m_mainThread;
     uint64_t m_epoch, m_exectime;
     std::atomic<bool> m_shutdown;
@@ -970,6 +985,7 @@ public:
     std::atomic<uint64_t> m_frameTime;
 private:
     std::atomic<bool> m_isConnected;
+	uint32_t m_listenPort;
 #ifdef TRACY_ON_DEMAND
     std::atomic<uint64_t> m_connectionId;
 

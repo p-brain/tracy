@@ -691,7 +691,10 @@ static pthread_key_t _memory_thread_heap;
 #    define TLS_MODEL
 #  else
 #    ifndef __HAIKU__
-#      define TLS_MODEL __attribute__((tls_model("initial-exec")))
+#      //define TLS_MODEL __attribute__((tls_model("initial-exec")))
+		// Removing attribute 'tls_model("initial-exec")' to avoid
+		// 'cannot allocate memory in static TLS block' error when loading tier0 dynamic library
+#		define TLS_MODEL
 #    else
 #      define TLS_MODEL
 #    endif

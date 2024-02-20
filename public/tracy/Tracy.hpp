@@ -5,7 +5,7 @@
 #define TRACY_IMPORTS 1
 #endif
 
-#if _DEBUG
+#ifdef _DEBUG
 
 #include <cmath>
 #include <algorithm>

@@ -175,6 +175,7 @@ void WINAPI EventRecordCallback( PEVENT_RECORD record )
             TracyLfqPrepare( QueueType::ThreadWakeup );
             MemWrite( &item->threadWakeup.time, hdr.TimeStamp.QuadPart );
             MemWrite( &item->threadWakeup.thread, rt->threadId );
+			MemWrite( &item->threadWakeup.readyingCpu, record->BufferContext.ProcessorNumber );
             TracyLfqCommit;
         }
         else if( hdr.EventDescriptor.Opcode == 1 || hdr.EventDescriptor.Opcode == 3 )
@@ -412,11 +413,13 @@ bool SysTraceStart( int64_t& samplingPeriod )
 #ifndef TRACY_NO_SAMPLING
     if( isOs64Bit )
     {
-        CLASSIC_EVENT_ID stackId[2] = {};
+        CLASSIC_EVENT_ID stackId[3] = {};
         stackId[0].EventGuid = PerfInfoGuid;
-        stackId[0].Type = 46;
+        stackId[0].Type = 46;	// SampledProfile event
         stackId[1].EventGuid = ThreadV2Guid;
-        stackId[1].Type = 36;
+        stackId[1].Type = 36;	// CSwitch event
+		stackId[2].EventGuid = ThreadV2Guid;
+		stackId[2].Type = 50;	// ReadyThread event
         const auto stackStatus = TraceSetInformation( s_traceHandle, TraceStackTracingInfo, &stackId, sizeof( stackId ) );
         if( stackStatus != ERROR_SUCCESS )
         {

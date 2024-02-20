@@ -14,7 +14,7 @@ constexpr float MinVisSize = 3;
 namespace tracy
 {
 
-bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDraw>& cpuDraw, const std::vector<std::vector<CpuCtxDraw>>& ctxDraw, int& offset, bool hasCpuData )
+bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDraw>& cpuDraw, const std::vector<std::vector<CpuCtxDraw>>& ctxDraw, int& offset, bool hasCpuData, bool drawThreadInteractions )
 {
     auto cpuData = m_worker.GetCpuData();
     const auto cpuCnt = m_worker.GetCpuDataCpuCount();
@@ -302,6 +302,43 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
                             ImGui::SameLine();
                             ImGui::TextDisabled( "(%s)", RealToString( thread ) );
                         }
+						if ( ev.WakeupVal() != -1 )
+						{
+							uint8_t wakeupCpu = ev.WakeupCpu();
+
+							TextFocused( "Readying CPU:", RealToString( wakeupCpu ) );
+
+							const ThreadData *pThreadData = GetThreadDataForCpu( wakeupCpu, ev.WakeupVal() );
+							if ( pThreadData )
+							{
+								TextDisabledUnformatted( "Readying thread:" );
+								ImGui::SameLine();
+
+								const auto thread = pThreadData->id;
+								bool local, untracked;
+								const char *txt;
+								auto label = GetThreadContextData( thread, local, untracked, txt );
+								if ( local || untracked )
+								{
+									uint32_t color;
+									if ( m_vd.dynamicColors != 0 )
+									{
+										color = local ? GetThreadColor( thread, 0 ) : ( untracked ? 0xFF663333 : 0xFF444444 );
+									}
+									else
+									{
+										color = local ? 0xFF334488 : ( untracked ? 0xFF663333 : 0xFF444444 );
+									}
+									TextColoredUnformatted( HighlightColor<75>( color ), label );
+									ImGui::SameLine();
+									ImGui::TextDisabled( "(%s)", RealToString( thread ) );
+								}
+								else
+								{
+									TextDisabledUnformatted( label );
+								}
+							}
+						}
                         ImGui::Separator();
                         TextFocused( "Start time:", TimeToStringExact( ev.Start() ) );
                         TextFocused( "End time:", TimeToStringExact( end ) );
@@ -357,7 +394,65 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
         offset += sstep;
     }
 
-    if( m_drawThreadMigrations != 0 )
+	// Drawing threads interactions
+	if ( drawThreadInteractions )
+	{
+		offset = origOffset;
+		for ( int i = 0; i < cpuCnt; i++ )
+		{
+			if ( !ctxDraw[ i ].empty() && wpos.y + offset + sty >= yMin && wpos.y + offset <= yMax )
+			{
+				auto &cs = cpuData[ i ].cs;
+				for ( auto &v : ctxDraw[ i ] )
+				{
+					const auto &ev = cs[ v.idx ];
+					if ( ev.WakeupVal() != -1 )
+					{
+						const auto readycolor = 0xFF2280A0; // 0xFF0000FF;
+						const auto bgSize = GetScale() * 4.f;
+						const auto lnSize = GetScale() * 2.f;
+						const auto arrowOffset = GetScale() * 5.f;
+
+						const auto readyt0 = ev.WakeupVal();
+						const auto readycpu0 = ev.WakeupCpu();
+
+						const auto readyt1 = ev.Start();
+						const auto readycpu1 = i;
+
+						const auto readypx0 = ( readyt0 - m_vd.zvStart ) * pxns;
+						const auto readypy0 = origOffset + sty * 0.5f + readycpu0 * sstep;
+
+						const auto readypx1 = ( readyt1 - m_vd.zvStart ) * pxns;
+						const auto readypy1 = origOffset + sty * 0.5f + readycpu1 * sstep;
+
+						if ( readypx1 - readypx0 < 2 )
+						{
+							if ( readypx1 - readypx0 < 1 )
+							{
+								// Too small, don't draw anything
+							}
+							else
+							{
+								DrawLine( draw, dpos + ImVec2( readypx0, readypy0 ), dpos + ImVec2( readypx0, readypy1 ), dpos + ImVec2( readypx1, readypy1 ), readycolor );
+							}
+						}
+						else
+						{
+							DrawLine( draw, dpos + ImVec2( readypx0, readypy0 ), dpos + ImVec2( readypx0, readypy1 ), dpos + ImVec2( readypx1, readypy1 ), 0xFF000000, bgSize );
+							DrawLine( draw, dpos + ImVec2( readypx1 - arrowOffset, readypy1 - arrowOffset ), dpos + ImVec2( readypx1, readypy1 ), dpos + ImVec2( readypx1 - arrowOffset, readypy1 + arrowOffset ), 0xFF000000, bgSize );
+
+							DrawLine( draw, dpos + ImVec2( readypx0, readypy0 ), dpos + ImVec2( readypx0, readypy1 ), dpos + ImVec2( readypx1, readypy1 ), readycolor, lnSize );
+							DrawLine( draw, dpos + ImVec2( readypx1 - arrowOffset, readypy1 - arrowOffset ), dpos + ImVec2( readypx1, readypy1 ), dpos + ImVec2( readypx1 - arrowOffset, readypy1 + arrowOffset ), readycolor, lnSize );
+						}
+					}
+				}
+			}
+
+			offset += sstep;
+		}
+	}
+	
+	if( m_drawThreadMigrations != 0 )
     {
         auto ctxSwitch = m_worker.GetContextSwitchData( m_drawThreadMigrations );
         if( ctxSwitch )

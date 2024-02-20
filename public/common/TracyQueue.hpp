@@ -594,6 +594,7 @@ struct QueueThreadWakeup
 {
     int64_t time;
     uint32_t thread;
+	uint8_t readyingCpu;
 };
 
 struct QueueTidToPid

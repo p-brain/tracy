@@ -513,7 +513,22 @@ void TimelineItemThread::PreprocessContextSwitches( const TimelineContext& ctx, 
                 }
                 if( found ) waitStack = sdit->callstack.Val();
             }
-            m_ctxDraw.emplace_back( ContextSwitchDraw { ContextSwitchDrawType::Waiting, uint32_t( it - vec.begin() ), waitStack } );
+
+			uint32_t readyingStack = 0;
+			if ( ev.WakeupVal() != ev.Start() )
+			{
+				const ThreadData *pReadyingThreadData = m_view.GetThreadDataForCpu( ev.WakeupCpu(), ev.WakeupVal() );
+				if ( pReadyingThreadData && !pReadyingThreadData->samples.empty() )
+				{
+					auto sdit = std::lower_bound( pReadyingThreadData->samples.begin(), pReadyingThreadData->samples.end(), ev.WakeupVal(), [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
+					if ( sdit != pReadyingThreadData->samples.end() && sdit->time.Val() == ev.WakeupVal() )
+					{
+						readyingStack = sdit->callstack.Val();
+					}
+				}
+			}
+
+            m_ctxDraw.emplace_back( ContextSwitchDraw { ContextSwitchDrawType::Waiting, uint32_t( it - vec.begin() ), waitStack, readyingStack } );
         }
 
         const auto end = ev.IsEndValid() ? ev.End() : ev.Start();

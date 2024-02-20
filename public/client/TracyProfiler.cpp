@@ -347,7 +347,11 @@ static void InitFailure( const char* msg )
 
 static bool CheckHardwareSupportsInvariantTSC()
 {
-    const char* noCheck = GetEnvVar( "TRACY_NO_INVARIANT_CHECK" );
+    // Disabling 'invariant TSC' check (currently failing if an exe runs on a virtual machine eg buildbot)
+	return true;
+	
+#if 0
+	const char* noCheck = GetEnvVar( "TRACY_NO_INVARIANT_CHECK" );
     if( noCheck && noCheck[0] == '1' ) return true;
 
     uint32_t regs[4];
@@ -364,6 +368,7 @@ static bool CheckHardwareSupportsInvariantTSC()
     if( regs[3] & ( 1 << 8 ) ) return true;
 
     return false;
+#endif
 }
 
 #if defined TRACY_TIMER_FALLBACK && defined TRACY_HW_TIMER
@@ -1368,8 +1373,15 @@ TRACY_API LuaZoneState& GetLuaZoneState() { return s_luaZoneState; }
 TRACY_API bool ProfilerAvailable() { return s_instance != nullptr; }
 TRACY_API bool ProfilerAllocatorAvailable() { return !RpThreadShutdown; }
 
+TRACY_API void RequestListenAndBroadcast()
+{
+	GetProfiler().RequestListenAndBroadcast();
+}
+
+
 Profiler::Profiler()
     : m_timeBegin( 0 )
+	, m_listenAndBroadcastRequested( false )
     , m_mainThread( detail::GetThreadHandleImpl() )
     , m_epoch( std::chrono::duration_cast<std::chrono::seconds>( std::chrono::system_clock::now().time_since_epoch() ).count() )
     , m_shutdown( false )
@@ -1395,6 +1407,7 @@ Profiler::Profiler()
     , m_symbolQueue( 8*1024 )
     , m_frameCount( 0 )
     , m_isConnected( false )
+	, m_listenPort( 0 )
 #ifdef TRACY_ON_DEMAND
     , m_connectionId( 0 )
     , m_deferredQueue( 64*1024 )
@@ -1620,13 +1633,18 @@ void Profiler::Worker()
         }
     }
 
-    static char buf[ _MAX_PATH ];
-    auto procname = GetProcessName();
-    if ( strstr( GetCommandLineA(), "-dedicated" ) && (strlen( procname) + strlen("DS_") < _MAX_PATH ) )
+	auto procname = GetProcessName();
+#ifdef _WIN32
+	const char *szCommandLine = GetCommandLineA();
+	static char buf[ _MAX_PATH ];
+    if ( strstr( szCommandLine, "-dedicated" ) && (strlen( procname) + strlen("DS_") < _MAX_PATH ) )
     {
         sprintf( buf, "DS_%s", procname );
         procname = buf;
     }
+#else
+	const char *szCommandLine = "";
+#endif
     const auto pnsz = std::min<size_t>( strlen( procname ), WelcomeMessageProgramNameSize - 1 );
 
     const auto hostinfo = GetHostInfo();
@@ -1700,6 +1718,24 @@ void Profiler::Worker()
 
     moodycamel::ConsumerToken token( GetQueue() );
 
+	if ( strstr( szCommandLine, "-tracy_enable" ) )
+	{
+		this->RequestListenAndBroadcast();
+	}
+
+	// Only start listening and broadcasting once the application tell us to do so
+	while ( m_listenAndBroadcastRequested.load( std::memory_order_relaxed ) == 0 )
+	{
+		if ( ShouldExit() )
+		{
+			m_shutdownFinished.store( true, std::memory_order_relaxed );
+			return;
+		}
+		
+		ClearQueues( token );
+		std::this_thread::sleep_for( std::chrono::milliseconds( 200 ) );
+	}
+
     ListenSocket listen;
     bool isListening = false;
     if( !dataPortSearch )
@@ -1708,7 +1744,7 @@ void Profiler::Worker()
     }
     else
     {
-        for( uint32_t i=0; i<20; i++ )
+        for( uint32_t i=0; i<32; i++ )
         {
             if( listen.Listen( dataPort+i, 4 ) )
             {
@@ -1732,11 +1768,12 @@ void Profiler::Worker()
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
         }
     }
+	m_listenPort = dataPort;
 
 #ifndef TRACY_NO_BROADCAST
     m_broadcast = (UdpBroadcast*)tracy_malloc( sizeof( UdpBroadcast ) );
     new(m_broadcast) UdpBroadcast();
-#  ifdef TRACY_ONLY_LOCALHOST
+#  if 1			// was ifdef TRACY_ONLY_LOCALHOST
     const char* addr = "127.255.255.255";
 #  elif defined __QNX__
      // global broadcast address of 255.255.255.255 is not well-supported by QNX,
