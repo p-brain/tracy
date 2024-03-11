@@ -34,6 +34,7 @@
 #include "../public/common/TracyVersion.hpp"
 #include "TracyFileRead.hpp"
 #include "TracyFileWrite.hpp"
+#include "TracyPrint.hpp"
 #include "TracySort.hpp"
 #include "TracyTaskDispatch.hpp"
 #include "TracyWorker.hpp"
@@ -61,7 +62,7 @@ static bool SourceFileValid( const char* fn, uint64_t olderThan )
 static const uint8_t FileHeader[8] { 't', 'r', 'a', 'c', 'y', Version::Major, Version::Minor, Version::Patch };
 enum { FileHeaderMagic = 5 };
 static const int CurrentVersion = FileVersion( Version::Major, Version::Minor, Version::Patch );
-static const int MinSupportedVersion = FileVersion( 0, 8, 0 );
+static const int MinSupportedVersion = FileVersion( 0, 9, 0 );
 
 
 static void UpdateLockCountLockable( LockMap& lockmap, size_t pos )
@@ -554,11 +555,12 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
     }
 }
 
-Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
+Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allowStringModification)
     : m_hasData( true )
     , m_stream( nullptr )
     , m_buffer( nullptr )
     , m_inconsistentSamples( false )
+    , m_allowStringModification(allowStringModification)
 {
     auto loadStart = std::chrono::high_resolution_clock::now();
 
@@ -708,8 +710,13 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
 
     f.Read( sz );
     m_data.stringMap.reserve( sz );
-    m_data.stringData.reserve( sz );
-    m_data.stringData.set_size( sz );
+
+    if( !m_allowStringModification )
+    {
+        m_data.stringData.reserve( sz );
+        m_data.stringData.set_size( sz );
+    }
+    
     for( uint64_t i=0; i<sz; i++ )
     {
         uint64_t ptr, ssz;
@@ -718,7 +725,16 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
         f.Read( dst, ssz );
         dst[ssz] = '\0';
         m_data.stringMap.emplace( charutil::StringKey { dst, size_t( ssz ) }, i );
+
+        if( m_allowStringModification )
+        {
+            m_data.stringData.push_back( dst );
+        }
+        else
+        {
         m_data.stringData[i] = ( dst );
+        }
+
         pointerMap.emplace( ptr, dst );
     }
 
@@ -763,6 +779,13 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     m_data.externalThreadCompress.Load( f );
 
     f.Read( sz );
+    if( sz > std::numeric_limits<int16_t>::max() )
+    {
+        s_loadProgress.total.store( 0, std::memory_order_relaxed );
+        char buf[256];
+        sprintf( buf, "Too many static source locations (%s)", RealToString( sz ) );
+        throw LoadFailure( buf );
+    }
     for( uint64_t i=0; i<sz; i++ )
     {
         uint64_t ptr;
@@ -779,6 +802,13 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     const auto sle = sz;
 
     f.Read( sz );
+    if( sz > std::numeric_limits<int16_t>::max() )
+    {
+        s_loadProgress.total.store( 0, std::memory_order_relaxed );
+        char buf[256];
+        sprintf( buf, "Too many dynamic source locations (%s)", RealToString( sz ) );
+        throw LoadFailure( buf );
+    }
     m_data.sourceLocationPayload.reserve_exact( sz, m_slab );
     for( uint64_t i=0; i<sz; i++ )
     {
@@ -1069,8 +1099,6 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
     {
         m_data.plots.Data().reserve( sz );
         s_loadProgress.subTotal.store( sz, std::memory_order_relaxed );
-        if( fileVer >= FileVersion( 0, 8, 3 ) )
-        {
             for( uint64_t i=0; i<sz; i++ )
             {
                 s_loadProgress.subProgress.store( i, std::memory_order_relaxed );
@@ -1095,51 +1123,11 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
         {
             for( uint64_t i=0; i<sz; i++ )
             {
-                s_loadProgress.subProgress.store( i, std::memory_order_relaxed );
-                auto pd = m_slab.AllocInit<PlotData>();
-                uint64_t psz;
-                f.Read7( pd->type, pd->format, pd->name, pd->min, pd->max, pd->sum, psz );
-                pd->showSteps = false;
-                pd->fill = true;
-                pd->color = 0;
-                pd->data.reserve_exact( psz, m_slab );
-                auto ptr = pd->data.data();
-                int64_t refTime = 0;
-                for( uint64_t j=0; j<psz; j++ )
-                {
-                    int64_t t;
-                    f.Read2( t, ptr->val );
-                    refTime += t;
-                    ptr->time = refTime;
-                    ptr++;
-                }
-                m_data.plots.Data().push_back_no_space_check( pd );
-            }
-        }
-    }
-    else
-    {
-        if( fileVer >= FileVersion( 0, 8, 3 ) )
-        {
-            for( uint64_t i=0; i<sz; i++ )
-            {
                 f.Skip( sizeof( PlotData::name ) + sizeof( PlotData::min ) + sizeof( PlotData::max ) + sizeof( PlotData::sum ) + sizeof( PlotData::type ) + sizeof( PlotData::format ) + sizeof( PlotData::showSteps ) + sizeof( PlotData::fill ) + sizeof( PlotData::color ) );
                 uint64_t psz;
                 f.Read( psz );
                 f.Skip( psz * ( sizeof( uint64_t ) + sizeof( double ) ) );
             }
-
-        }
-        else
-        {
-            for( uint64_t i=0; i<sz; i++ )
-            {
-                f.Skip( sizeof( PlotData::name ) + sizeof( PlotData::min ) + sizeof( PlotData::max ) + sizeof( PlotData::sum ) + sizeof( PlotData::type ) + sizeof( PlotData::format ) );
-                uint64_t psz;
-                f.Read( psz );
-                f.Skip( psz * ( sizeof( uint64_t ) + sizeof( double ) ) );
-            }
-        }
     }
 
     s_loadProgress.subTotal.store( 0, std::memory_order_relaxed );
@@ -1572,37 +1560,6 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks )
             uint32_t len;
             f.Read2( symAddr, len );
             f.Skip( len );
-        }
-    }
-
-    if( fileVer <= FileVersion( 0, 8, 4 ) )
-    {
-        f.Read( sz );
-        for( uint64_t i=0; i<sz; i++ )
-        {
-            uint64_t packed;
-            uint16_t lsz;
-            f.Read2( packed, lsz );
-            uint32_t line;
-            const auto fidx = UnpackFileLine( packed, line );
-            uint64_t ref = 0;
-            for( uint16_t j=0; j<lsz; j++ )
-            {
-                uint64_t diff;
-                f.Read( diff );
-                ref += diff;
-                auto frameId = PackPointer( ref );
-                if( m_data.callstackFrameMap.find( frameId ) == m_data.callstackFrameMap.end() )
-                {
-                    auto cs = m_slab.AllocInit<CallstackFrameData>();
-                    cs->size = 1;
-                    cs->data = m_slab.AllocInit<CallstackFrame>( 1 );
-                    cs->data->file = StringIdx( fidx );
-                    cs->data->line = line;
-                    cs->data->symAddr = 0;
-                    m_data.callstackFrameMap.emplace( frameId, cs );
-                }
-            }
         }
     }
 
@@ -3446,6 +3403,12 @@ void Worker::NewSourceLocation( uint64_t ptr )
 {
     static const SourceLocation emptySourceLocation = {};
 
+    if( m_data.sourceLocation.size() > std::numeric_limits<int16_t>::max() )
+    {
+        SourceLocationOverflowFailure();
+        return;
+    }
+
     m_data.sourceLocation.emplace( ptr, emptySourceLocation );
     m_pendingSourceLocation++;
     m_sourceLocationQueue.push_back( ptr );
@@ -3828,6 +3791,11 @@ void Worker::AddSourceLocationPayload( const char* data, size_t sz )
         auto slptr = m_slab.Alloc<SourceLocation>();
         memcpy( slptr, &srcloc, sizeof( srcloc ) );
         uint32_t idx = m_data.sourceLocationPayload.size();
+        if( idx+1 > std::numeric_limits<int16_t>::max() )
+        {
+            SourceLocationOverflowFailure();
+            return;
+        }
         m_data.sourceLocationPayloadMap.emplace( slptr, idx );
         m_pendingSourceLocationPayload = -int16_t( idx + 1 );
         m_data.sourceLocationPayload.push_back( slptr );
@@ -5039,9 +5007,11 @@ void Worker::ProcessZoneEnd( const QueueZoneEnd& ev )
     const auto timeSpan = timeEnd - zone->Start();
     if( timeSpan > 0 )
     {
+        const auto ctid = CompressThread( td->id );
         ZoneThreadData ztd;
         ztd.SetZone( zone );
-        ztd.SetThread( CompressThread( td->id ) );
+        ztd.SetThread( ctid );
+
         auto slz = GetSourceLocationZones( zone->SrcLoc() );
         slz->zones.push_back( ztd );
         if( slz->min > timeSpan ) slz->min = timeSpan;
@@ -5052,6 +5022,7 @@ void Worker::ProcessZoneEnd( const QueueZoneEnd& ev )
         if( slz->selfMin > selfSpan ) slz->selfMin = selfSpan;
         if( slz->selfMax < selfSpan ) slz->selfMax = selfSpan;
         slz->selfTotal += selfSpan;
+
         if( !isReentry )
         {
             slz->nonReentrantCount++;
@@ -5062,6 +5033,16 @@ void Worker::ProcessZoneEnd( const QueueZoneEnd& ev )
         if( !td->childTimeStack.empty() )
         {
             td->childTimeStack.back() += timeSpan;
+        }
+
+        auto it = slz->threadCnt.find( ctid );
+        if( it == slz->threadCnt.end() )
+        {
+            slz->threadCnt.emplace( ctid, 1 );
+        }
+        else
+        {
+            it->second++;
         }
     }
     else
@@ -5155,6 +5136,11 @@ void Worker::FrameImageTwiceFailure()
 void Worker::FiberLeaveFailure()
 {
     m_failure = Failure::FiberLeave;
+}
+
+void Worker::SourceLocationOverflowFailure()
+{
+    m_failure = Failure::SourceLocationOverflow;
 }
 
 void Worker::ProcessZoneValidation( const QueueZoneValidation& ev )
@@ -7612,15 +7598,18 @@ void Worker::ReconstructZoneStatistics( uint8_t* countMap, ZoneEvent& zone, uint
     {
         auto it = m_data.sourceLocationZones.find( zone.SrcLoc() );
         assert( it != m_data.sourceLocationZones.end() );
+
         ZoneThreadData ztd;
         ztd.SetZone( &zone );
         ztd.SetThread( thread );
+
         auto& slz = it->second;
         slz.zones.push_back( ztd );
         if( slz.min > timeSpan ) slz.min = timeSpan;
         if( slz.max < timeSpan ) slz.max = timeSpan;
         slz.total += timeSpan;
         slz.sumSq += double( timeSpan ) * timeSpan;
+
         if( countMap[uint16_t(zone.SrcLoc())] == 0 )
         {
             slz.nonReentrantCount++;
@@ -7628,6 +7617,7 @@ void Worker::ReconstructZoneStatistics( uint8_t* countMap, ZoneEvent& zone, uint
             if( slz.nonReentrantMax < timeSpan ) slz.nonReentrantMax = timeSpan;
             slz.nonReentrantTotal += timeSpan;
         }
+
         if( zone.HasChildren() )
         {
             auto& children = GetZoneChildren( zone.Child() );
@@ -7639,9 +7629,20 @@ void Worker::ReconstructZoneStatistics( uint8_t* countMap, ZoneEvent& zone, uint
                 timeSpan -= childSpan;
             }
         }
+
         if( slz.selfMin > timeSpan ) slz.selfMin = timeSpan;
         if( slz.selfMax < timeSpan ) slz.selfMax = timeSpan;
         slz.selfTotal += timeSpan;
+
+        auto tit = slz.threadCnt.find( thread );
+        if( tit == slz.threadCnt.end() )
+        {
+            slz.threadCnt.emplace( thread, 1 );
+        }
+        else
+        {
+            tit->second++;
+        }
     }
 }
 
@@ -8296,7 +8297,7 @@ void Worker::Write( FileWrite& f, bool fiDict )
             WriteTimeOffset( f, refTime, cs.Start() );
             WriteTimeOffset( f, refTime, cs.End() );
 			uint8_t wakeupCpu = cs.WakeupCpu();
-			uint8_t cpu = cs.Cpu();
+            uint8_t cpu = cs.Cpu();
             int8_t reason = cs.Reason();
             int8_t state = cs.State();
             uint64_t thread = DecompressThread( cs.Thread() );
@@ -8318,7 +8319,7 @@ void Worker::Write( FileWrite& f, bool fiDict )
         for( auto& cx : m_data.cpuData[i].cs )
         {
 			WriteTimeOffset( f, refTime, cx.WakeupVal() );
-			WriteTimeOffset( f, refTime, cx.Start() );
+            WriteTimeOffset( f, refTime, cx.Start() );
             WriteTimeOffset( f, refTime, cx.End() );
             uint16_t thread = cx.Thread();
 			uint8_t wakeupCpu = cx.WakeupCpu();
@@ -8494,6 +8495,7 @@ static const char* s_failureReasons[] = {
     "Frame image offset is invalid.",
     "Multiple frame images were sent for a single frame.",
     "Fiber execution stopped on a thread which is not executing a fiber.",
+    "Too many source locations. You cannot have more than 32K static or dynamic source locations.",
 };
 
 static_assert( sizeof( s_failureReasons ) / sizeof( *s_failureReasons ) == (int)Worker::Failure::NUM_FAILURES, "Missing failure reason description." );

@@ -376,7 +376,7 @@ void View::DrawZoneInfoWindow()
             }
             if( ImGui::Button( ICON_FA_FILE_LINES " Source" ) )
             {
-                ViewSource( fileName, srcloc.line );
+                ViewSourceCheckKeyMod( fileName, srcloc.line, m_worker.GetString( srcloc.function ) );
             }
             ImGui::SameLine();
             if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
@@ -982,7 +982,7 @@ void View::DrawZoneInfoWindow()
             {
                 if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
                 {
-                    ViewSource( fileName, srcloc.line );
+                    ViewSourceCheckKeyMod( fileName, srcloc.line, m_worker.GetString( srcloc.function ) );
                 }
                 else
                 {
@@ -1434,7 +1434,7 @@ void View::DrawGpuInfoWindow()
             }
             if( ImGui::Button( ICON_FA_FILE_LINES " Source" ) )
             {
-                ViewSource( fileName, srcloc.line );
+                ViewSourceCheckKeyMod( fileName, srcloc.line, m_worker.GetString( srcloc.function ) );
             }
             ImGui::SameLine();
             if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
@@ -1561,7 +1561,7 @@ void View::DrawGpuInfoWindow()
             {
                 if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
                 {
-                    ViewSource( fileName, srcloc.line );
+                    ViewSourceCheckKeyMod( fileName, srcloc.line, m_worker.GetString( srcloc.function ) );
                 }
                 else
                 {

@@ -62,6 +62,8 @@ template<class T> T ceil( T x )
 
 #ifndef TRACY_ENABLE
 
+#define TracyNoop
+
 #define ZoneNamed(x,y)
 #define ZoneNamedN(x,y,z)
 #define ZoneNamedC(x,y,z)
@@ -77,8 +79,12 @@ template<class T> T ceil( T x )
 
 #define ZoneText(x,y)
 #define ZoneTextV(x,y,z)
+#define ZoneTextF(x,...)
+#define ZoneTextVF(x,y,...)
 #define ZoneName(x,y)
 #define ZoneNameV(x,y,z)
+#define ZoneNameF(x,...)
+#define ZoneNameVF(x,y,...)
 #define ZoneColor(x)
 #define ZoneColorV(x,y)
 #define ZoneValue(x)
@@ -167,6 +173,8 @@ template<class T> T ceil( T x )
 #include "../client/TracyProfiler.hpp"
 #include "../client/TracyScoped.hpp"
 
+#define TracyNoop tracy::ProfilerAvailable()
+
 #if defined TRACY_HAS_CALLSTACK && defined TRACY_CALLSTACK
 #  define ZoneNamed( varname, active ) static constexpr tracy::SourceLocationData TracyConcat(__tracy_source_location,TracyLine) { nullptr, TracyFunction,  TracyFile, (uint32_t)TracyLine, 0 }; tracy::ScopedZone varname( &TracyConcat(__tracy_source_location,TracyLine), TRACY_CALLSTACK, active )
 #  define ZoneNamedN( varname, name, active ) static constexpr tracy::SourceLocationData TracyConcat(__tracy_source_location,TracyLine) { name, TracyFunction,  TracyFile, (uint32_t)TracyLine, 0 }; tracy::ScopedZone varname( &TracyConcat(__tracy_source_location,TracyLine), TRACY_CALLSTACK, active )
@@ -192,8 +200,12 @@ template<class T> T ceil( T x )
 
 #define ZoneText( txt, size ) ___tracy_scoped_zone.Text( txt, size )
 #define ZoneTextV( varname, txt, size ) varname.Text( txt, size )
+#define ZoneTextF( fmt, ... ) ___tracy_scoped_zone.TextFmt( fmt, ##__VA_ARGS__ )
+#define ZoneTextVF( varname, fmt, ... ) varname.TextFmt( fmt, ##__VA_ARGS__ )
 #define ZoneName( txt, size ) ___tracy_scoped_zone.Name( txt, size )
 #define ZoneNameV( varname, txt, size ) varname.Name( txt, size )
+#define ZoneNameF( fmt, ... ) ___tracy_scoped_zone.NameFmt( fmt, ##__VA_ARGS__ )
+#define ZoneNameVF( varname, fmt, ... ) varname.NameFmt( fmt, ##__VA_ARGS__ )
 #define ZoneColor( color ) ___tracy_scoped_zone.Color( color )
 #define ZoneColorV( varname, color ) varname.Color( color )
 #define ZoneValue( value ) ___tracy_scoped_zone.Value( value )

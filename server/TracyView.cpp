@@ -159,6 +159,68 @@ void View::ViewSource( const char* fileName, int line )
     m_sourceView->OpenSource( fileName, line, *this, m_worker );
 }
 
+void View::ViewSource( const char* fileName, int line, const char* functionName )
+{
+    assert( functionName );
+
+    uint64_t addr = 0;
+    uint64_t base = 0;
+    const auto fnsz = strlen( functionName );
+    auto& symMap = m_worker.GetSymbolMap();
+    for( auto& sym : symMap )
+    {
+        const auto name = m_worker.GetString( sym.second.name );
+        const auto ptr = strstr( name, functionName );
+        if( ptr &&
+            ( ptr[fnsz] == 0 || ptr[fnsz] == '(' || ptr[fnsz] == '<' ) &&
+            ( ptr == name || ( ptr[-1] == ' ' || ptr[-1] == ':' ) ) )
+        {
+            if( addr != 0 )
+            {
+                // Ambiguous function name. Bail out.
+                ViewSource( fileName, line );
+                return;
+            }
+            else
+            {
+                addr = sym.first;
+                if( sym.second.isInline )
+                {
+                    base = m_worker.GetSymbolForAddress( addr );
+                    if( base == 0 )
+                    {
+                        addr = 0;
+                    }
+                }
+                else
+                {
+                    base = addr;
+                }
+            }
+        }
+    }
+    if( addr != 0 && base != 0 )
+    {
+        ViewSymbol( fileName, line, base, addr );
+    }
+    else
+    {
+        ViewSource( fileName, line );
+    }
+}
+
+void View::ViewSourceCheckKeyMod( const char* fileName, int line, const char* functionName )
+{
+    if( ImGui::GetIO().KeyCtrl )
+    {
+        ViewSource( fileName, line );
+    }
+    else
+    {
+        ViewSource( fileName, line, functionName );
+    }
+}
+
 void View::ViewSymbol( const char* fileName, int line, uint64_t baseAddr, uint64_t symAddr )
 {
     assert( fileName || symAddr );
@@ -830,19 +892,19 @@ bool View::DrawImpl()
         if( ImGui::Button( ICON_FA_MAGNIFYING_GLASS_PLUS ) ) ImGui::OpenPopup( "ZoomPopup" );
         if( ImGui::BeginPopup( "ZoomPopup" ) )
         {
-            if( ImGui::Button( "50%" ) )  m_sscb( 1.f/2,     m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "57%" ) )  m_sscb( 1.f/1.75f, m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "66%" ) )  m_sscb( 1.f/1.5f,  m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "80%" ) )  m_sscb( 1.f/1.25f, m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "100%" ) ) m_sscb( 1.f,       m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "125%" ) ) m_sscb( 1.25f,     m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "150%" ) ) m_sscb( 1.5f,      m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "175%" ) ) m_sscb( 1.75f,     m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "200%" ) ) m_sscb( 2.f,       m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "225%" ) ) m_sscb( 2.25f,     m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "250%" ) ) m_sscb( 2.5f,      m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "275%" ) ) m_sscb( 2.75f,     m_fixedFont, m_bigFont, m_smallFont );
-            if( ImGui::Button( "300%" ) ) m_sscb( 3.f,       m_fixedFont, m_bigFont, m_smallFont );
+            if( ImGui::Button( "50%" ) )  m_sscb( 1.f/2 );
+            if( ImGui::Button( "57%" ) )  m_sscb( 1.f/1.75f );
+            if( ImGui::Button( "66%" ) )  m_sscb( 1.f/1.5f );
+            if( ImGui::Button( "80%" ) )  m_sscb( 1.f/1.25f );
+            if( ImGui::Button( "100%" ) ) m_sscb( 1.f );
+            if( ImGui::Button( "125%" ) ) m_sscb( 1.25f );
+            if( ImGui::Button( "150%" ) ) m_sscb( 1.5f );
+            if( ImGui::Button( "175%" ) ) m_sscb( 1.75f );
+            if( ImGui::Button( "200%" ) ) m_sscb( 2.f );
+            if( ImGui::Button( "225%" ) ) m_sscb( 2.25f );
+            if( ImGui::Button( "250%" ) ) m_sscb( 2.5f );
+            if( ImGui::Button( "275%" ) ) m_sscb( 2.75f );
+            if( ImGui::Button( "300%" ) ) m_sscb( 3.f );
             ImGui::EndPopup();
         }
     }

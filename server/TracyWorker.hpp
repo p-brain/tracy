@@ -64,6 +64,12 @@ struct LegacyVersion : public std::exception
     int version;
 };
 
+struct LoadFailure : public std::exception
+{
+    LoadFailure( const char* msg ) : msg( msg ) {}
+    std::string msg;
+};
+
 struct LoadProgress
 {
     enum Stage
@@ -205,6 +211,7 @@ private:
         int64_t nonReentrantMin = std::numeric_limits<int64_t>::max();
         int64_t nonReentrantMax = std::numeric_limits<int64_t>::min();
         int64_t nonReentrantTotal = 0;
+        unordered_flat_map<uint16_t, uint64_t> threadCnt;
     };
 
     struct GpuSourceLocationZones
@@ -441,13 +448,14 @@ public:
         FrameImageIndex,
         FrameImageTwice,
         FiberLeave,
+        SourceLocationOverflow,
 
         NUM_FAILURES
     };
 
     Worker( const char* addr, uint16_t port );
     Worker( const char* name, const char* program, const std::vector<ImportEventTimeline>& timeline, const std::vector<ImportEventMessages>& messages, const std::vector<ImportEventPlots>& plots, const std::unordered_map<uint64_t, std::string>& threadNames );
-    Worker( FileRead& f, EventType::Type eventMask = EventType::All, bool bgTasks = true );
+    Worker( FileRead& f, EventType::Type eventMask = EventType::All, bool bgTasks = true, bool allowStringModification = false);
     ~Worker();
 
     const std::string& GetAddr() const { return m_addr; }
@@ -549,6 +557,8 @@ public:
     bool HasInlineSymbolAddresses() const { return !m_data.codeSymbolMap.empty(); }
     StringIdx GetLocationForAddress( uint64_t address, uint32_t& line ) const;
     const uint64_t* GetInlineSymbolList( uint64_t sym, uint32_t len );
+
+    unordered_flat_map<CallstackFrameId, CallstackFrameData*, CallstackFrameIdHash, CallstackFrameIdCompare>& GetCallstackFrameMap() { return m_data.callstackFrameMap; }
 
 #ifndef TRACY_NO_STATISTICS
     const VarArray<CallstackFrameId>& GetParentCallstack( uint32_t idx ) const { return *m_data.parentCallstackPayload[idx]; }
@@ -668,7 +678,8 @@ public:
 
     void CacheSourceFiles();
 
-    void CreateZonesFromGpuData();
+    StringLocation StoreString(const char* str, size_t sz);
+	void CreateZonesFromGpuData();
 
 private:
     void Network();
@@ -790,6 +801,7 @@ private:
     void FrameImageIndexFailure();
     void FrameImageTwiceFailure();
     void FiberLeaveFailure();
+    void SourceLocationOverflowFailure();
 
     tracy_force_inline void CheckSourceLocation( uint64_t ptr );
     void NewSourceLocation( uint64_t ptr );
@@ -897,7 +909,6 @@ private:
 
     uint32_t GetSingleStringIdx();
     uint32_t GetSecondStringIdx();
-    StringLocation StoreString( const char* str, size_t sz );
     const ContextSwitch* const GetContextSwitchDataImpl( uint64_t thread );
 
     void CacheSource( const StringRef& str, const StringIdx& image = StringIdx() );
@@ -993,6 +1004,7 @@ private:
     bool m_combineSamples;
     bool m_identifySamples = false;
     bool m_inconsistentSamples;
+    bool m_allowStringModification = false;
 
     short_ptr<GpuCtxData> m_gpuCtxMap[256];
     uint32_t m_pendingCallstackId = 0;

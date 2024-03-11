@@ -103,6 +103,7 @@ class View
         size_t sourceCount;
         size_t count;
         int64_t total;
+        uint16_t threadNum;
     };
 
 public:
@@ -113,7 +114,7 @@ public:
     };
 
     using SetTitleCallback = void(*)( const char* );
-    using SetScaleCallback = void(*)( float, ImFont*&, ImFont*&, ImFont*& );
+    using SetScaleCallback = void(*)( float );
     using AttentionCallback = void(*)();
 
     View( void(*cbMainThread)(const std::function<void()>&, bool), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb, const Config& config );
@@ -123,8 +124,12 @@ public:
     bool Draw();
     bool WasActive() const;
 
+    void UpdateFont( ImFont* fixed, ImFont* small, ImFont* big ) { m_fixedFont = fixed; m_smallFont = small; m_bigFont = big; }
+
     void NotifyRootWindowSize( float w, float h ) { m_rootWidth = w; m_rootHeight = h; }
     void ViewSource( const char* fileName, int line );
+    void ViewSource( const char* fileName, int line, const char* functionName );
+    void ViewSourceCheckKeyMod( const char* fileName, int line, const char* functionName );
     void ViewSymbol( const char* fileName, int line, uint64_t baseAddr, uint64_t symAddr );
     bool ViewDispatch( const char* fileName, int line, uint64_t symAddr );
 
@@ -502,6 +507,7 @@ private:
     bool m_statHideUnknown = true;
     bool m_showAllSymbols = false;
     int m_showCallstackFrameAddress = 0;
+    bool m_showExternalFrames = true;
     bool m_showUnknownFrames = true;
     bool m_statSeparateInlines = false;
     bool m_statShowAddress = false;

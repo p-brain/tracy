@@ -107,6 +107,8 @@ static ConnectionHistory* connHist;
 static std::atomic<ViewShutdown> viewShutdown { ViewShutdown::False };
 static double animTime = 0;
 static float dpiScale = 1.f;
+static bool dpiScaleOverriddenFromEnv = false;
+static float userScale = 1.f;
 static Filters* filt;
 static RunQueue mainThreadTasks;
 static uint32_t updateVersion = 0;
@@ -156,9 +158,12 @@ static void RunOnMainThread( const std::function<void()>& cb, bool forceDelay = 
     mainThreadTasks.Queue( cb, forceDelay );
 }
 
-static void SetupDPIScale( float scale, ImFont*& cb_fixedWidth, ImFont*& cb_bigFont, ImFont*& cb_smallFont )
+static void SetupDPIScale()
 {
-    LoadFonts( scale, cb_fixedWidth, cb_bigFont, cb_smallFont );
+    auto scale = dpiScale * userScale;
+
+    LoadFonts( scale );
+    if( view ) view->UpdateFont( s_fixedWidth, s_smallFont, s_bigFont );
 
 #ifdef __APPLE__
     // No need to upscale the style on macOS, but we need to downscale the fonts.
@@ -187,9 +192,10 @@ static void SetupDPIScale( float scale, ImFont*& cb_fixedWidth, ImFont*& cb_bigF
     delete[] scaleIcon;
 }
 
-static void SetupScaleCallback( float scale, ImFont*& cb_fixedWidth, ImFont*& cb_bigFont, ImFont*& cb_smallFont )
+static void SetupScaleCallback( float scale )
 {
-    RunOnMainThread( [scale, &cb_fixedWidth, &cb_bigFont, &cb_smallFont] { SetupDPIScale( scale * dpiScale, cb_fixedWidth, cb_bigFont, cb_smallFont ); }, true );
+    userScale = scale;
+    RunOnMainThread( []{ SetupDPIScale(); }, true );
 }
 
 static void LoadConfig()
@@ -221,6 +227,15 @@ static bool SaveConfig()
     return true;
 }
 
+static void ScaleChanged( float scale )
+{
+    if ( dpiScaleOverriddenFromEnv ) return;
+    if ( dpiScale == scale ) return;
+
+    dpiScale = scale;
+    SetupDPIScale();
+}
+
 int main( int argc, char** argv )
 {
     sprintf( title, "Tracy Profiler %i.%i.%i", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch );
@@ -241,7 +256,25 @@ int main( int argc, char** argv )
             printf( "      %s -a address [-p port]\n", argv[0] );
             exit( 0 );
         }
-        initFileOpen = std::unique_ptr<tracy::FileRead>( tracy::FileRead::Open( argv[1] ) );
+        try
+        {
+            initFileOpen = std::unique_ptr<tracy::FileRead>( tracy::FileRead::Open( argv[1] ) );
+        }
+        catch( const tracy::UnsupportedVersion& e )
+        {
+            fprintf( stderr, "The file you are trying to open is from the future version.\n" );
+            exit( 1 );
+        }
+        catch( const tracy::NotTracyDump& e )
+        {
+            fprintf( stderr, "The file you are trying to open is not a tracy dump.\n" );
+            exit( 1 );
+        }
+        catch( const tracy::LegacyVersion& e )
+        {
+            fprintf( stderr, "The file you are trying to open is from a legacy version.\n" );
+            exit( 1 );
+        }
         if( !initFileOpen )
         {
             fprintf( stderr, "Cannot open trace file: %s\n", argv[1] );
@@ -341,7 +374,7 @@ int main( int argc, char** argv )
     LoadConfig();
 
     ImGuiTracyContext imguiContext;
-    Backend backend( title, DrawContents, &mainThreadTasks );
+    Backend backend( title, DrawContents, ScaleChanged, &mainThreadTasks );
     tracy::InitTexture();
     iconTex = tracy::MakeTexture();
     zigzagTex = tracy::MakeTexture( true );
@@ -354,10 +387,14 @@ int main( int argc, char** argv )
     if( envDpiScale )
     {
         const auto cnv = atof( envDpiScale );
-        if( cnv != 0 ) dpiScale = cnv;
+        if( cnv != 0 )
+        {
+            dpiScale = cnv;
+            dpiScaleOverriddenFromEnv = true;
+        }
     }
 
-    SetupDPIScale( dpiScale, s_fixedWidth, s_bigFont, s_smallFont );
+    SetupDPIScale();
 
     tracy::UpdateTextureRGBAMips( zigzagTex, (void**)zigzagPx, zigzagX, zigzagY, 6 );
     for( auto& v : zigzagPx ) free( v );
@@ -577,6 +614,15 @@ static void UpdateBroadcastClients()
     }
 }
 
+static void TextComment( const char* str )
+{
+    ImGui::SameLine();
+    ImGui::PushFont( s_smallFont );
+    ImGui::AlignTextToFramePadding();
+    tracy::TextDisabledUnformatted( str );
+    ImGui::PopFont();
+}
+
 static void DrawContents()
 {
     static bool reconnect = false;
@@ -721,34 +767,46 @@ static void DrawContents()
                 tracy::OpenWebpage( "https://github.com/wolfpld/tracy" );
             }
             ImGui::Separator();
+            if( ImGui::Selectable( ICON_FA_VIDEO " An Introduction to Tracy Profiler in C++ - Marcos Slomp - CppCon 2023" ) )
+            {
+                tracy::OpenWebpage( "https://youtu.be/ghXk3Bk5F2U?t=37" );
+            }
+            ImGui::Separator();
             if( ImGui::Selectable( ICON_FA_VIDEO " New features in v0.8" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=30wpRpHTTag" );
             }
+            TextComment( "2022-03-28" );
             if( ImGui::Selectable( ICON_FA_VIDEO " New features in v0.7" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=_hU7vw00MZ4" );
             }
+            TextComment( "2020-06-11" );
             if( ImGui::Selectable( ICON_FA_VIDEO " New features in v0.6" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=uJkrFgriuOo" );
             }
+            TextComment( "2019-11-17" );
             if( ImGui::Selectable( ICON_FA_VIDEO " New features in v0.5" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=P6E7qLMmzTQ" );
             }
+            TextComment( "2019-08-10" );
             if( ImGui::Selectable( ICON_FA_VIDEO " New features in v0.4" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=eAkgkaO8B9o" );
             }
+            TextComment( "2018-10-09" );
             if( ImGui::Selectable( ICON_FA_VIDEO " New features in v0.3" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=3SXpDpDh2Uo" );
             }
+            TextComment( "2018-07-03" );
             if( ImGui::Selectable( ICON_FA_VIDEO " Overview of v0.2" ) )
             {
                 tracy::OpenWebpage( "https://www.youtube.com/watch?v=fB5B46lbapc" );
             }
+            TextComment( "2018-03-25" );
             ImGui::EndPopup();
         }
         ImGui::SameLine();
@@ -867,6 +925,11 @@ static void DrawContents()
                                 badVer.state = tracy::BadVersionState::LegacyVersion;
                                 badVer.version = e.version;
                             }
+                            catch( const tracy::LoadFailure& e )
+                            {
+                                badVer.state = tracy::BadVersionState::LoadFailure;
+                                badVer.msg = e.msg;
+                            }
                         } );
                     }
                 }
@@ -880,13 +943,13 @@ static void DrawContents()
                 }
             } );
         }
+#endif
 
         if( badVer.state != tracy::BadVersionState::Ok )
         {
             if( loadThread.joinable() ) { loadThread.join(); }
             tracy::BadVersion( badVer, s_bigFont );
         }
-#endif
 
         if( !clients.empty() )
         {
