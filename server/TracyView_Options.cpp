@@ -38,14 +38,6 @@ void View::DrawOptions()
     ImGui::SameLine();
     ImGui::Text( "Frames Max (ms)" );
 
-    ImGui::SetNextItemWidth( 90 * scale );
-    if ( ImGui::InputInt( "##PlotsMax", &m_vd.plotsMaxTimeMS ) )
-    {
-        if ( m_vd.plotsMaxTimeMS < 1 ) m_vd.plotsMaxTimeMS = 1;
-    }
-    ImGui::SameLine();
-    ImGui::Text( "ZonePlot Max (ms)" );
-
     ImGui::Separator();
 
     bool val = m_vd.drawEmptyLabels;
@@ -606,11 +598,14 @@ void View::DrawOptions()
 
             for( const auto& p : m_worker.GetPlots() )
             {
-                SmallColorBox( GetPlotColor( *p, m_worker ) );
-                ImGui::SameLine();
-                m_tc.GetItem( p ).VisibilityCheckbox();
-                ImGui::SameLine();
-                ImGui::TextDisabled( "%s data points", RealToString( p->data.size() ) );
+				if ( p->type != PlotType::AdditionalZone )
+				{
+					SmallColorBox( GetPlotColor( *p, m_worker ) );
+					ImGui::SameLine();
+					m_tc.GetItem( p ).VisibilityCheckbox();
+					ImGui::SameLine();
+					ImGui::TextDisabled( "%s data points", RealToString( p->data.size() ) );
+				}
             }
             ImGui::TreePop();
         }

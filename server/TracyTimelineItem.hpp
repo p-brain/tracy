@@ -44,6 +44,7 @@ protected:
     virtual const char* HeaderLabel() const = 0;
 
     virtual void HeaderTooltip( const char* label ) const {};
+    virtual float HeaderLabelPrefix( const TimelineContext &ctx, int xOffset, int yOffset ) { return 0.0f; };
     virtual void HeaderExtraContents( const TimelineContext& ctx, int offset, float labelWidth ) {};
 	virtual void HeaderExtraPopupItems() {};
 

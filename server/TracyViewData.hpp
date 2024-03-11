@@ -64,7 +64,6 @@ struct ViewData
     uint32_t frameTarget = 60;
     float    flFrameHeightScale = 1.0f;
     int32_t frameOverviewMaxTimeMS = 15;
-    int32_t plotsMaxTimeMS = 15;
 
 };
 

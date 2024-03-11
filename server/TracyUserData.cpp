@@ -117,7 +117,6 @@ void UserData::LoadState( ViewData& data )
             fread( &data.frameTarget, 1, sizeof( data.frameTarget ), f );
             fread( &data.flFrameHeightScale, 1, sizeof( data.flFrameHeightScale ), f );
             fread( &data.frameOverviewMaxTimeMS, 1, sizeof( data.frameOverviewMaxTimeMS ), f );
-            fread( &data.plotsMaxTimeMS, 1, sizeof( data.plotsMaxTimeMS ), f );
         }
         fclose( f );
     }
@@ -169,7 +168,6 @@ void UserData::SaveState( const ViewData& data )
         fwrite( &data.frameTarget, 1, sizeof( data.frameTarget ), f );
         fwrite( &data.flFrameHeightScale, 1, sizeof( data.flFrameHeightScale ), f );
         fwrite( &data.frameOverviewMaxTimeMS, 1, sizeof( data.frameOverviewMaxTimeMS ), f );
-        fwrite( &data.plotsMaxTimeMS, 1, sizeof( data.plotsMaxTimeMS ), f );
 
         fclose( f );
     }

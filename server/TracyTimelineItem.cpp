@@ -37,9 +37,12 @@ void TimelineItem::Draw( bool firstFrame, const TimelineContext& ctx, int yOffse
         return;
     }
 
+    const auto label = HeaderLabel();
+    ImVec2 labelSize = ImGui::CalcTextSize( label );
+
     const auto w = ctx.w;
     const auto ty = ctx.ty;
-    const auto ostep = ty + 1;
+    const auto ostep = labelSize.y + 1;
     const auto& wpos = ctx.wpos;
     const auto yPos = wpos.y + yBegin;
     const auto dpos = wpos + ImVec2( 0.5f, 0.5f );
@@ -67,7 +70,7 @@ void TimelineItem::Draw( bool firstFrame, const TimelineContext& ctx, int yOffse
 
     float labelWidth;
     const auto hdrOffset = yBegin;
-    const bool drawHeader = yPos + ty >= ctx.yMin && yPos <= ctx.yMax;
+    const bool drawHeader = yPos + labelSize.y >= ctx.yMin && yPos <= ctx.yMax;
     if( drawHeader )
     {
         const auto color = HeaderColor();
@@ -81,16 +84,16 @@ void TimelineItem::Draw( bool firstFrame, const TimelineContext& ctx, int yOffse
         {
             DrawTextContrast( draw, wpos + ImVec2( 0, hdrOffset ), colorInactive, ICON_FA_CARET_RIGHT );
         }
-        const auto label = HeaderLabel();
-        labelWidth = ImGui::CalcTextSize( label ).x;
-        DrawTextContrast( draw, wpos + ImVec2( ty, hdrOffset ), m_showFull ? color : colorInactive, label );
+        labelWidth = labelSize.x;
+        auto prefixWidth = HeaderLabelPrefix( ctx, ty, hdrOffset );
+        DrawTextContrast( draw, wpos + ImVec2( ty + prefixWidth, hdrOffset ), m_showFull ? color : colorInactive, label );
         if( m_showFull )
         {
-            DrawLine( draw, dpos + ImVec2( 0, hdrOffset + ty - 1 ), dpos + ImVec2( w, hdrOffset + ty - 1 ), HeaderLineColor() );
-            HeaderExtraContents( ctx, hdrOffset, labelWidth );
+            DrawLine( draw, dpos + ImVec2( 0, hdrOffset + labelSize.y - 1 ), dpos + ImVec2( w, hdrOffset + labelSize.y - 1 ), HeaderLineColor() );
+            HeaderExtraContents( ctx, hdrOffset, labelWidth + prefixWidth );
         }
 
-        if( ctx.hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( 0, hdrOffset ), wpos + ImVec2( ty + labelWidth, hdrOffset + ty ) ) )
+        if( ctx.hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( 0, hdrOffset ), wpos + ImVec2( ty + prefixWidth + labelWidth, hdrOffset + labelSize.y ) ) )
         {
             HeaderTooltip( label );
 

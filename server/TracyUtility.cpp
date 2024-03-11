@@ -161,6 +161,9 @@ uint32_t GetPlotColor( const PlotData& plot, const Worker& worker )
         return 0xFF33CC33;
     case PlotType::Zone:
         return 0xFF44FF44;
+    case PlotType::AdditionalZone:
+        if ( plot.color != 0 ) return plot.color;
+        return GetHsvColor( charutil::hash( worker.GetString( plot.name ) ), -10 );
     default:
         assert( false );
         return 0;

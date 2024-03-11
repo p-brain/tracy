@@ -2611,19 +2611,28 @@ std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool 
 }
 
 #ifndef TRACY_NO_STATISTICS
-void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc )
+void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc, bool bAggregatePerFrame, bool bZoneName, bool bAddToExistingPlot )
 {
     assert( AreSourceLocationZonesReady() );
     auto it = m_data.sourceLocationZones.find( srcloc );
     if ( it != m_data.sourceLocationZones.end() )
     {
-        const SourceLocationZones &srcLoc = it->second;
-        const SortedVector<ZoneThreadData, SourceLocationZones::ZtdSort> &zones = srcLoc.zones;
+        SourceLocationZones &srcLoc = it->second;
+        SortedVector<ZoneThreadData, SourceLocationZones::ZtdSort> &zones = srcLoc.zones;
+        zones.ensure_sorted();
 
         // Store plot name
-        const auto lenPlotName = strlen( szPlotName );
+        const char *pFullPlotName = szPlotName;
+        if ( bAggregatePerFrame )
+        {
+            static char extendedPlotName[ 1024 ];
+            snprintf( extendedPlotName, 1024, "%s [PER-FRAME TOTAL]", szPlotName );
+            pFullPlotName = extendedPlotName;
+        }
+
+        const auto lenPlotName = strlen( pFullPlotName );
         auto ptr = m_slab.Alloc<char>( lenPlotName + 1 );
-        memcpy( ptr, szPlotName, lenPlotName );
+        memcpy( ptr, pFullPlotName, lenPlotName );
         ptr[ lenPlotName ] = '\0';
 
         uint64_t nPlotName = ( uint64_t )ptr;
@@ -2639,22 +2648,79 @@ void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc
         plot->data.reserve( zones.size() );
 
         plot->name = nPlotName;
-        plot->type = PlotType::Zone;
+        plot->type = bAddToExistingPlot ? PlotType::AdditionalZone : PlotType::Zone;
         plot->format = PlotValueFormatting::Number;
-        plot->showSteps = 0;
+        plot->showSteps = bAggregatePerFrame ? 1 : 0;
         plot->fill = 1;
         plot->color = 0;
 
-        plot->min = srcLoc.min / ( 1000.0 * 1000.0 );
-        plot->max = srcLoc.max / ( 1000.0 * 1000.0 );
-        plot->sum = srcLoc.total / ( 1000.0 * 1000.0 );
-        for ( const ZoneThreadData &zoneThreadData : zones )
+        if ( !bAggregatePerFrame )
         {
-            const ZoneEvent &zone = *zoneThreadData.Zone();
-            int64_t zoneDurationNs = GetZoneEndDirect( zone ) - zone.Start();
-            double zoneDurationMs = zoneDurationNs / ( 1000.0 * 1000.0 );
-            
-            plot->data.push_back( { zone.Start(), zoneDurationMs } );
+            plot->min = srcLoc.min / ( 1000.0 * 1000.0 );
+            plot->max = srcLoc.max / ( 1000.0 * 1000.0 );
+            plot->sum = srcLoc.total / ( 1000.0 * 1000.0 );
+            for ( const ZoneThreadData &zoneThreadData : zones )
+            {
+                const ZoneEvent &zone = *zoneThreadData.Zone();
+                int64_t zoneDurationNs = GetZoneEndDirect( zone ) - zone.Start();
+                double zoneDurationMs = zoneDurationNs / ( 1000.0 * 1000.0 );
+
+                if ( !bZoneName || 
+                     ( HasZoneExtra( zone ) && 
+                       GetZoneExtra( zone ).name.Active() && 
+                       strcmp( GetString( GetZoneExtra( zone ).name ), szPlotName ) == 0 ) )
+                {
+                    plot->data.push_back( { zone.Start(), zoneDurationMs } );
+                }
+            }
+        }
+        else
+        {
+            plot->min = 0.0;
+            plot->max = 0.0;
+            plot->sum = 0.0;
+
+            const FrameData *pFrameData = GetFramesBase();
+            if ( pFrameData )
+            {
+                size_t nFrameCount = GetFrameCount( *pFrameData );
+                size_t nZoneCount = zones.size();
+                size_t nCurrentZone = 0;
+                for ( size_t nFrame = 0; nFrame < nFrameCount; ++nFrame )
+                {
+                    int64_t frameBeginTime = GetFrameBegin( *pFrameData, nFrame );
+                    int64_t frameEndTime = GetFrameEnd( *pFrameData, nFrame );
+                    double zoneTotalDurationPerFrameMs = 0.0;
+                    int64_t zoneStartTime = 0;
+
+                    while ( ( nCurrentZone < nZoneCount ) && ( zoneStartTime < frameEndTime ) )
+                    {
+                        const ZoneThreadData &zoneThreadData = zones[ nCurrentZone ];
+                        const ZoneEvent &zone = *zoneThreadData.Zone();
+
+                        zoneStartTime = zone.Start();
+                        if ( ( zoneStartTime < frameEndTime ) )
+                        {
+                            if ( !bZoneName ||
+                                 ( HasZoneExtra( zone ) &&
+                                   GetZoneExtra( zone ).name.Active() &&
+                                   strcmp( GetString( GetZoneExtra( zone ).name ), szPlotName ) == 0 ) )
+                            {
+                                int64_t zoneDurationNs = GetZoneEndDirect( zone ) - zone.Start();
+                                zoneTotalDurationPerFrameMs += ( zoneDurationNs / ( 1000.0 * 1000.0 ) );
+                            }
+
+                            // move to the next zone
+                            nCurrentZone++;
+                        }
+                    }
+                    
+                    if ( plot->min > zoneTotalDurationPerFrameMs ) plot->min = zoneTotalDurationPerFrameMs;
+                    else if ( plot->max < zoneTotalDurationPerFrameMs ) plot->max = zoneTotalDurationPerFrameMs;
+                    plot->sum += zoneTotalDurationPerFrameMs;
+                    plot->data.push_back( { frameBeginTime, zoneTotalDurationPerFrameMs } );
+                }
+            }
         }
 
         m_data.plots.Data().push_back( plot );
@@ -4309,6 +4375,27 @@ void Worker::DoPostponedWork()
             }
         }
         m_data.newContextSwitchesReceived = false;
+    }
+    if ( m_data.plotsPendingDeletion.size() > 0 )
+    {
+        PlotData *plotToDelete = m_data.plotsPendingDeletion.back_and_pop();
+        PlotData **pPlot = m_data.plots.Data().end();
+        while ( plotToDelete && pPlot >= m_data.plots.Data().begin() )
+        {
+            if ( plotToDelete == *pPlot )
+            {
+                if ( pPlot == m_data.plots.Data().end() )
+                {
+                    m_data.plots.Data().pop_back();
+                }
+                else
+                {
+                    m_data.plots.Data().erase( pPlot );
+                }
+                plotToDelete = ( m_data.plotsPendingDeletion.size() > 0 ) ? m_data.plotsPendingDeletion.back_and_pop() : nullptr;
+            }
+            pPlot--;
+        }
     }
 #endif
 }
@@ -8014,11 +8101,11 @@ void Worker::Write( FileWrite& f, bool fiDict )
     }
 
     sz = m_data.plots.Data().size();
-    for( auto& plot : m_data.plots.Data() ) { if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone ) ) sz--; }
+    for( auto& plot : m_data.plots.Data() ) { if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone || plot->type == PlotType::AdditionalZone ) ) sz--; }
     f.Write( &sz, sizeof( sz ) );
     for( auto& plot : m_data.plots.Data() )
     {
-        if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone ) ) continue;
+        if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone || plot->type == PlotType::AdditionalZone ) ) continue;
         f.Write( &plot->type, sizeof( plot->type ) );
         f.Write( &plot->format, sizeof( plot->format ) );
         f.Write( &plot->showSteps, sizeof( plot->showSteps ) );

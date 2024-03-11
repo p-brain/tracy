@@ -739,7 +739,8 @@ enum class PlotType : uint8_t
     Memory,
     SysTime,
     Power,
-	Zone
+	Zone,
+	AdditionalZone //Add to previous zone plot
 };
 
 // Keep this in sync with enum in TracyC.h

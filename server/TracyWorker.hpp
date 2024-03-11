@@ -305,6 +305,7 @@ private:
         bool sourceLocationZonesReady = false;
         unordered_flat_map<int16_t, GpuSourceLocationZones> gpuSourceLocationZones;
         bool gpuSourceLocationZonesReady = false;
+        Vector<PlotData *> plotsPendingDeletion;
 #else
         unordered_flat_map<int16_t, uint64_t> sourceLocationZonesCnt;
         unordered_flat_map<int16_t, uint64_t> gpuSourceLocationZonesCnt;
@@ -597,7 +598,7 @@ public:
     const unordered_flat_map<uint64_t, SymbolData>& GetSymbolMap() const { return m_data.symbolMap; }
 
 #ifndef TRACY_NO_STATISTICS
-    void CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc );
+    void CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc, bool bAggregatePerFrame, bool bZoneName, bool bAddToExistingPlot );
     SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc );
     const SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc ) const;
     const unordered_flat_map<int16_t, SourceLocationZones>& GetSourceLocationZones() const { return m_data.sourceLocationZones; }
@@ -613,6 +614,7 @@ public:
     bool AreCallstackSamplesReady() const { return m_data.callstackSamplesReady; }
     bool AreGhostZonesReady() const { return m_data.ghostZonesReady; }
     bool AreSymbolSamplesReady() const { return m_data.symbolSamplesReady; }
+    void QueuePlotForDelete( PlotData *plot ) { m_data.plotsPendingDeletion.push_back(plot); }
 #endif
 
     tracy_force_inline uint16_t CompressThread( uint64_t thread ) { return m_data.localThreadCompress.CompressThread( thread ); }

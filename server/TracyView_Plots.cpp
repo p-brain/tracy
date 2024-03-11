@@ -14,7 +14,7 @@ namespace tracy
 constexpr int PlotHeightPx = 100;
 
 
-bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vector<uint32_t>& plotDraw, int& offset )
+bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vector<uint32_t>& plotDraw, int& offset, double fixedMax, bool bMultiPlot )
 {
     auto draw = ImGui::GetWindowDrawList();
     const auto& wpos = ctx.wpos;
@@ -57,18 +57,23 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             max = pv.max;
         }
 
-		if ( plot.type == PlotType::Zone )
-		{
-			max = ( double ) m_vd.plotsMaxTimeMS;
-			min = 0.0;
-		}
+        if ( fixedMax > -1 ) max = fixedMax;
+
+        if ( plot.type == PlotType::Zone || plot.type == PlotType::AdditionalZone )
+        {
+            min = 0.0;
+        }
 
         const auto color = GetPlotColor( plot, m_worker );
-        const auto bg = 0x22000000 | ( DarkenColorMore( color ) & 0xFFFFFF );
         const auto fill = 0x22000000 | ( DarkenColor( color ) & 0xFFFFFF );
 
-		ImGui::PushClipRect( ImVec2( dpos.x, yPos ), ImVec2( dpos.x + w, yPos + PlotHeight ), true );
-		draw->AddRectFilled( ImVec2( dpos.x, yPos ), ImVec2( dpos.x + w, yPos + PlotHeight ), bg );
+        ImGui::PushClipRect( ImVec2( dpos.x, yPos ), ImVec2( dpos.x + w, yPos + PlotHeight ), true );
+
+        if ( plot.type != PlotType::AdditionalZone )
+        {
+            const auto bg = 0x22000000 | ( DarkenColorMore( color ) & 0xFFFFFF );
+            draw->AddRectFilled( ImVec2( dpos.x, yPos ), ImVec2( dpos.x + w, yPos + PlotHeight ), bg );
+        }
 
         const auto revrange = 1.0 / ( max - min );
 
@@ -114,11 +119,11 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             {
                 if( i0 == 0 )
                 {
-                    DrawPlotPoint( wpos, x, y, offset, color, hover, false, v0, 0, plot.type, plot.format, PlotHeight, plot.name );
+                    DrawPlotPoint( wpos, x, y, offset, color, hover, false, v0, 0, plot.type, plot.format, PlotHeight, plot.name, bMultiPlot );
                 }
                 else
                 {
-                    DrawPlotPoint( wpos, x, y, offset, color, hover, true, v0, vec[i0-1].val, plot.type, plot.format, PlotHeight, plot.name );
+                    DrawPlotPoint( wpos, x, y, offset, color, hover, true, v0, vec[i0-1].val, plot.type, plot.format, PlotHeight, plot.name, bMultiPlot );
                 }
                 px = x;
                 py = y;
@@ -183,11 +188,18 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             }
         }
 
-        auto tmp = FormatPlotValue( max, plot.format );
-        DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
-        offset += PlotHeight - ty;
-        tmp = FormatPlotValue( min, plot.format );
-        DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
+        if ( plot.type != PlotType::AdditionalZone )
+        {
+            auto tmp = FormatPlotValue( max, plot.format );
+            DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
+            offset += PlotHeight - ty;
+            tmp = FormatPlotValue( min, plot.format );
+            DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
+        }
+        else
+        {
+            offset += PlotHeight - ty;
+        }
 
         DrawLine( draw, dpos + ImVec2( 0, offset + ty - 1 ), dpos + ImVec2( w, offset + ty - 1 ), 0xFF226E6E );
         offset += ty;
@@ -248,12 +260,14 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
     if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( x - 2, offset ), wpos + ImVec2( x + 2, offset + PlotHeight ) ) )
     {
         ImGui::BeginTooltip();
+        ImGui::PushStyleColor( ImGuiCol_Text, color );
         TextFocused( "Value:", FormatPlotValue( val, format ) );
+        ImGui::PopStyleColor();
         ImGui::EndTooltip();
     }
 }
 
-void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name )
+void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name, bool bMultiPlot )
 {
     auto draw = ImGui::GetWindowDrawList();
     draw->AddRect( wpos + ImVec2( x - 1.5f, offset + y - 1.5f ), wpos + ImVec2( x + 2.5f, offset + y + 2.5f ), color );
@@ -261,6 +275,13 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
     if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( x - 2, offset ), wpos + ImVec2( x + 2, offset + PlotHeight ) ) )
     {
         ImGui::BeginTooltip();
+
+        ImGui::PushStyleColor( ImGuiCol_Text, color );
+        if ( bMultiPlot )
+        {
+            // Include plot name to distinguish indiviudual plots
+            TextFocused( "Plot:", m_worker.GetString( name ) );
+        }
         TextFocused( "Time:", TimeToStringExact( item.time.Val() ) );
         if( type == PlotType::Memory )
         {
@@ -363,6 +384,7 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
                 }
             }
         }
+        ImGui::PopStyleColor();
         ImGui::EndTooltip();
     }
 }

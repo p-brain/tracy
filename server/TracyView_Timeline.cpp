@@ -369,9 +369,22 @@ void View::DrawTimeline()
 
     if ( m_vd.drawPlots == ViewData::EPlotViz::Top )
     {
+        TimelineItemPlot *pZoneItem = nullptr;
         for ( const auto &v : m_worker.GetPlots() )
         {
-            m_tc.AddItem<TimelineItemPlot>( v );
+            if ( pZoneItem && v->type == PlotType::AdditionalZone )
+            {
+                pZoneItem->AddPlot( v );
+            }
+            else if ( v->type == PlotType::Zone  )
+            {
+                m_tc.AddItem<TimelineItemPlot>( v );
+                pZoneItem = ( TimelineItemPlot * ) &m_tc.GetItem( v );
+            }
+            else
+            {
+                m_tc.AddItem<TimelineItemPlot>( v );
+            }
         }
     }
 
@@ -423,9 +436,22 @@ void View::DrawTimeline()
 
     if( m_vd.drawPlots == ViewData::EPlotViz::Bottom )
     {
-        for( const auto& v : m_worker.GetPlots() )
+        TimelineItemPlot *pZoneItem = nullptr;
+        for ( const auto &v : m_worker.GetPlots() )
         {
-            m_tc.AddItem<TimelineItemPlot>( v );
+            if ( pZoneItem && v->type == PlotType::AdditionalZone )
+            {
+                pZoneItem->AddPlot( v );
+            }
+            else if ( v->type == PlotType::Zone )
+            {
+                m_tc.AddItem<TimelineItemPlot>( v );
+                pZoneItem = ( TimelineItemPlot * ) &m_tc.GetItem( v );
+            }
+            else
+            {
+                m_tc.AddItem<TimelineItemPlot>( v );
+            }
         }
     }
 

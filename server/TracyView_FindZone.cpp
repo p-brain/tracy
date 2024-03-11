@@ -1368,14 +1368,19 @@ void View::DrawFindZone()
         SmallCheckbox( "Show zone time in frames", &m_findZone.showZoneInFrames );
         if ( zoneData.zones.size() > 0 )
         {
-            ImGui::SameLine();
-            if ( ImGui::Button( ICON_FA_SIGNATURE " Plot zone" ) )
+            ImGui::Separator();
+            bool bZoneNameSelected = m_findZone.groupBy == FindZone::GroupBy::ZoneName && m_findZone.selGroup != m_findZone.Unselected;
+            static bool s_bPlotZoneNameCheckbox = false;
+            static bool s_bAddToExistingPlotCheckbox = false;
+            bool bPlotZoneName = bZoneNameSelected ? s_bPlotZoneNameCheckbox : false;
+
+            if ( ImGui::Button( ICON_FA_CHART_LINE " Plot zone" ) )
             {
                 const char *szPlotName = "";
-                const ZoneEvent &ev = *zoneData.zones[ 0 ].Zone();
+                const ZoneEvent &ev = ( m_findZone.selGroup != m_findZone.Unselected ) ? *m_findZone.groups[ m_findZone.selGroup ].zones[ 0 ] : *zoneData.zones[ 0 ].Zone();
                 auto &srcloc = m_worker.GetSourceLocation( m_findZone.match[ m_findZone.selMatch ] );
 
-                if ( m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).name.Active() )
+                if ( bPlotZoneName && m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).name.Active() )
                 {
                     szPlotName = m_worker.GetString( m_worker.GetZoneExtra( ev ).name );
                 }
@@ -1388,8 +1393,48 @@ void View::DrawFindZone()
                     szPlotName = m_worker.GetString( srcloc.function );
                 }
                 
-                m_worker.CreatePlotForSourceLocation( szPlotName, m_findZone.match[ m_findZone.selMatch ] );
+                m_worker.CreatePlotForSourceLocation( szPlotName, m_findZone.match[ m_findZone.selMatch ], false, bPlotZoneName, s_bAddToExistingPlotCheckbox );
             }
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_FA_CHART_LINE " Plot zone (per-frame total)" ) )
+            {
+                const char *szPlotName = "";
+                const ZoneEvent &ev = ( m_findZone.selGroup != m_findZone.Unselected ) ? *m_findZone.groups[ m_findZone.selGroup ].zones[ 0 ] : *zoneData.zones[ 0 ].Zone();
+                auto &srcloc = m_worker.GetSourceLocation( m_findZone.match[ m_findZone.selMatch ] );
+
+                if ( bPlotZoneName && m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).name.Active() )
+                {
+                    szPlotName = m_worker.GetString( m_worker.GetZoneExtra( ev ).name );
+                }
+                else if ( srcloc.name.active )
+                {
+                    szPlotName = m_worker.GetString( srcloc.name );
+                }
+                else
+                {
+                    szPlotName = m_worker.GetString( srcloc.function );
+                }
+
+                m_worker.CreatePlotForSourceLocation( szPlotName, m_findZone.match[m_findZone.selMatch], true, bPlotZoneName, s_bAddToExistingPlotCheckbox );
+            }
+            bool bExistingZonePlot = false;
+            for ( const auto &v : m_worker.GetPlots() )
+            {
+                if ( v->type == PlotType::Zone )
+                {
+                    bExistingZonePlot = true;
+                    break;
+                }
+            }
+            if ( m_findZone.groupBy == FindZone::GroupBy::ZoneName && m_findZone.selGroup != m_findZone.Unselected )
+            {
+                SmallCheckbox( "Restrict plot to selected zone name", &s_bPlotZoneNameCheckbox );
+            }
+            if ( bExistingZonePlot )
+            {
+                SmallCheckbox( "Add to existing plot", &s_bAddToExistingPlotCheckbox );
+            }
+
         }
         ImGui::Separator();
 
