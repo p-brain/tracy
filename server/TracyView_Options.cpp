@@ -246,7 +246,7 @@ void View::DrawOptions()
     ImGui::PopStyleVar();
     ImGui::Unindent();
     m_vd.dynamicColors = ival;
-    ival = (int)m_shortenName;
+    ival = std::clamp( ( int ) m_vd.zoneNameShortening, ( int ) ShortenName::Never, ( int ) ShortenName::NoSpaceAndNormalize );
     ImGui::TextUnformatted( ICON_FA_RULER_HORIZONTAL " Zone name shortening" );
     ImGui::Indent();
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
@@ -257,7 +257,28 @@ void View::DrawOptions()
     ImGui::RadioButton( "As needed + normalize", &ival, 4 );
     ImGui::PopStyleVar();
     ImGui::Unindent();
+    m_vd.zoneNameShortening = ival;
     m_shortenName = (ShortenName)ival;
+
+    ival = std::clamp( ( int ) m_vd.stackCollapseMode, 0, 2 );
+    ImGui::TextUnformatted( ICON_FA_RULER_HORIZONTAL " Thread stack clamping" );
+    ImGui::Indent();
+    ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
+    ImGui::RadioButton( "Dynamic##stackCollapseClamp", &ival, ViewData::CollapseDynamic );
+    ImGui::RadioButton( "Max##stackCollapseClamp", &ival, ViewData::CollapseMax );
+    ImGui::RadioButton( "Limit##stackCollapseClamp", &ival, ViewData::CollapseLimit );
+    m_vd.stackCollapseMode = ival;
+
+    ImGui::SameLine();
+    tmp = m_vd.stackCollapseClamp;
+    ImGui::SetNextItemWidth( 90 * scale );
+    if( ImGui::InputInt( "##stackCollapseClampLimit", &tmp ) )
+    {
+        m_vd.stackCollapseClamp = std::clamp( tmp, 0, 256 );
+        m_vd.stackCollapseMode = ViewData::CollapseLimit;
+    }
+    ImGui::PopStyleVar();
+    ImGui::Unindent();
     ImGui::Unindent();
 
     if( !m_worker.GetLockMap().empty() )

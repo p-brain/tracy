@@ -55,6 +55,7 @@ private:
     std::vector<TimelineDraw> m_draw;
     std::vector<MessagesDraw> m_msgDraw;
     std::vector<std::unique_ptr<LockDraw>> m_lockDraw;
+    int m_maxDepth;
     int m_depth;
     bool m_hasCtxSwitch;
     bool m_hasSamples;

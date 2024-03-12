@@ -699,6 +699,7 @@ struct ThreadData
     ThreadData* fiber;
     uint8_t* stackCount;
     uint32_t nSort;
+    int32_t maxDepth;
 
     tracy_force_inline void IncStackCount( int16_t srcloc ) { stackCount[uint16_t(srcloc)]++; }
     tracy_force_inline bool DecStackCount( int16_t srcloc ) { return --stackCount[uint16_t(srcloc)] != 0; }
@@ -708,6 +709,7 @@ struct GpuCtxThreadData
 {
     Vector<short_ptr<GpuEvent>> timeline;
     Vector<short_ptr<GpuEvent>> stack;
+    int32_t maxDepth;
 };
 
 struct GpuCtxData

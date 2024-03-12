@@ -36,6 +36,7 @@ struct RangeSlim
 
 struct ViewData
 {
+    enum EThreadStackCollapse { CollapseDynamic = 0, CollapseMax = 1, CollapseLimit = 2 };
     enum EPlotViz { Disable = 0, Top, Bottom };
     const char *const ppszPlotViz[ 3 ]{ "Disable Plots", "Plots Above Zones", "Plots Below Zone" };
 
@@ -65,6 +66,9 @@ struct ViewData
     float    flFrameHeightScale = 1.0f;
     int32_t frameOverviewMaxTimeMS = 15;
 
+    uint8_t zoneNameShortening = 4;
+    uint8_t stackCollapseMode = EThreadStackCollapse::CollapseDynamic;
+    int32_t stackCollapseClamp = 0;
 };
 
 struct Annotation

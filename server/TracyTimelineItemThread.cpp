@@ -22,6 +22,7 @@ TimelineItemThread::TimelineItemThread( View& view, Worker& worker, const Thread
     , m_thread( thread )
     , m_ghost( false )
 {
+    m_maxDepth = m_thread->maxDepth;
     auto name = worker.GetThreadName( thread->id );
     if( strncmp( name, "Tracy ", 6 ) == 0 )
     {
@@ -260,8 +261,22 @@ void TimelineItemThread::HeaderExtraContents( const TimelineContext& ctx, int of
 
 bool TimelineItemThread::DrawContents( const TimelineContext& ctx, int& offset )
 {
-    m_view.DrawThread( ctx, *m_thread, m_draw, m_ctxDraw, m_samplesDraw, m_lockDraw, offset, m_depth, m_hasCtxSwitch, m_hasSamples );
-    if( m_depth == 0 && !m_hasMessages )
+    bool hasMessageCheck = m_hasMessages;
+    int depth = m_depth;
+    if ( m_view.GetViewData().stackCollapseMode == ViewData::CollapseMax )
+    {
+        depth = m_maxDepth;
+        hasMessageCheck = !m_thread->messages.empty();
+    }
+    else if ( m_view.GetViewData().stackCollapseMode == ViewData::CollapseLimit )
+    {
+        depth = std::min(m_view.GetViewData().stackCollapseClamp, m_maxDepth);
+        hasMessageCheck = !m_thread->messages.empty();
+    }
+
+    m_view.DrawThread( ctx, *m_thread, m_draw, m_ctxDraw, m_samplesDraw, m_lockDraw, offset, depth, m_hasCtxSwitch, m_hasSamples );
+
+    if( depth == 0 && !hasMessageCheck )
     {
         auto& crash = m_worker.GetCrashEvent();
         return crash.thread == m_thread->id;
@@ -296,11 +311,13 @@ void TimelineItemThread::Preprocess( const TimelineContext& ctx, TaskDispatch& t
         if( m_worker.AreGhostZonesReady() && ( m_ghost || ( m_view.GetViewData().ghostZones && m_thread->timeline.empty() ) ) )
         {
             m_depth = PreprocessGhostLevel( ctx, m_thread->ghostZones, 0, visible );
+            m_maxDepth = std::max(m_maxDepth, m_depth);
         }
         else
 #endif
         {
             m_depth = PreprocessZoneLevel( ctx, m_thread->timeline, 0, visible );
+            m_maxDepth = std::max(m_maxDepth, m_depth);
         }
     } );
 
@@ -401,7 +418,13 @@ int TimelineItemThread::PreprocessGhostLevel( const TimelineContext& ctx, const 
 
 int TimelineItemThread::PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<ZoneEvent>>& vec, int depth, bool visible )
 {
-    if( vec.is_magic() )
+    if ( m_view.GetViewData().stackCollapseMode == ViewData::CollapseLimit )
+    {
+        int maxDepth = std::min(m_view.GetViewData().stackCollapseClamp, m_maxDepth);
+        visible = ( depth < maxDepth );
+    }
+
+    if ( vec.is_magic() )
     {
         return PreprocessZoneLevel<VectorAdapterDirect<ZoneEvent>>( ctx, *(Vector<ZoneEvent>*)( &vec ), depth, visible );
     }

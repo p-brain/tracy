@@ -10,7 +10,7 @@ namespace tracy
 
 constexpr float MinVisSize = 3;
 
-bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset )
+bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset, unordered_flat_map<uint64_t, int32_t>& depths )
 {
     const auto w = ctx.w;
     const auto ty = ctx.ty;
@@ -45,7 +45,19 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offs
                 const auto begin = tlm.front().GpuStart();
                 const auto drift = GpuDrift( &gpu );
                 if( !singleThread ) offset += sstep;
-                const auto partDepth = DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset, 0, gpu.thread, yMin, yMax, begin, drift );
+                auto partDepth = DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset, 0, gpu.thread, yMin, yMax, begin, drift );
+
+                int32_t maxDepth = std::max(partDepth, td.second.maxDepth);
+                if ( GetViewData().stackCollapseMode == ViewData::CollapseMax )
+                {
+                    partDepth = maxDepth;
+                }
+                else if ( GetViewData().stackCollapseMode == ViewData::CollapseLimit )
+                {
+                    partDepth = std::min(GetViewData().stackCollapseClamp, maxDepth);
+                }
+                depths[ td.first ] = maxDepth;
+
                 if( partDepth != 0 )
                 {
                     if( !singleThread )
@@ -72,7 +84,19 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offs
                 const auto begin = tl.front()->GpuStart();
                 const auto drift = GpuDrift( &gpu );
                 if( !singleThread ) offset += sstep;
-                const auto partDepth = DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset, 0, gpu.thread, yMin, yMax, begin, drift );
+                auto partDepth = DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset, 0, gpu.thread, yMin, yMax, begin, drift );
+
+                int32_t maxDepth = std::max(partDepth, td.second.maxDepth);
+                if ( GetViewData().stackCollapseMode == ViewData::CollapseMax )
+                {
+                    partDepth = maxDepth;
+                }
+                else if ( GetViewData().stackCollapseMode == ViewData::CollapseLimit )
+                {
+                    partDepth = std::min(GetViewData().stackCollapseClamp, maxDepth);
+                }
+                depths[ td.first ] = maxDepth;
+
                 if( partDepth != 0 )
                 {
                     if( !singleThread )
@@ -98,12 +122,18 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offs
 
 int View::DispatchGpuZoneLevel( const Vector<short_ptr<GpuEvent>>& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int _offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift )
 {
+    bool skipDraw = false;
+    if ( GetViewData().stackCollapseMode == ViewData::CollapseLimit )
+    {
+        skipDraw = (depth >= GetViewData().stackCollapseClamp);
+    }
+
     const auto ty = ImGui::GetTextLineHeight();
     const auto ostep = ty + 1;
     const auto offset = _offset + ostep * depth;
 
     const auto yPos = wpos.y + offset;
-    if( yPos + ostep >= yMin && yPos <= yMax )
+    if( !skipDraw && (yPos + ostep >= yMin && yPos <= yMax) )
     {
         if( vec.is_magic() )
         {
@@ -160,6 +190,13 @@ int View::DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx,
         const auto zsz = std::max( ( end - start ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
+            if( ev.Child() >= 0 )
+            {
+                ImVec2 forceDepthCalc( 0, 0 );
+                const auto d = DispatchGpuZoneLevel( m_worker.GetGpuChildren( ev.Child() ), hover, pxns, nspx, forceDepthCalc, _offset, depth, thread, yMin, yMax, begin, drift );
+                if( d > maxdepth ) maxdepth = d;
+            }
+
             const auto color = GetZoneColor( ev );
             const auto MinVisNs = MinVisSize * nspx;
             int num = 0;
