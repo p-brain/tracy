@@ -57,7 +57,7 @@ void View::DrawFrames()
     assert( m_worker.GetFrameCount( *m_frames ) != 0 );
 
     const auto scale = GetScale();
-    const auto Height = 50 * scale * m_vd.flFrameHeightScale;
+    auto Height = 50 * scale * m_vd.flFrameHeightScale;
 
     const uint64_t MaxFrameTime = m_vd.frameOverviewMaxTimeMS * 1000 * 1000;  // 50ms
 
@@ -80,6 +80,15 @@ void View::DrawFrames()
     draw->AddRectFilled( wpos, wpos + ImVec2( w, Height ), 0x33FFFFFF );
     const auto wheel = io.MouseWheel;
     const auto prevScale = m_vd.frameScale;
+
+    float heightDiff = UpdateAndDrawResizeBar( m_framesResize );
+    if ( heightDiff )
+    {
+        float newHeight = Height + heightDiff;
+        const auto heightNoViewScale = 50 * scale;
+        const auto newScale = newHeight / heightNoViewScale;
+        m_vd.flFrameHeightScale = newScale;
+    }
 
     if( hover )
     {
@@ -174,7 +183,7 @@ void View::DrawFrames()
                     ImGui::SameLine();
                     ImGui::TextDisabled( "(%.1f FPS)", 1000000000.0 / f );
 
-                    if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameTime( *m_frames, sel ), m_worker.GetFrameTime( *m_frames, sel + g - 1 ), true };
+                    if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameTime( *m_frames, sel ), m_worker.GetFrameTime( *m_frames, sel + g - 1 ), true, nullptr };
                 }
                 else
                 {
@@ -280,7 +289,7 @@ void View::DrawFrames()
                     }
                 }
 
-                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameBegin( *m_frames, sel ), m_worker.GetFrameEnd( *m_frames, sel + group - 1 ), true };
+                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { m_worker.GetFrameBegin( *m_frames, sel ), m_worker.GetFrameEnd( *m_frames, sel + group - 1 ), true, nullptr };
             }
 
             if (( !m_worker.IsConnected() || m_viewMode == ViewMode::Paused ) && wheel != 0)

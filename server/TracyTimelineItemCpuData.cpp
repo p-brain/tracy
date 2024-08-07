@@ -26,26 +26,28 @@ bool TimelineItemCpuData::IsVisible() const
     return m_view.GetViewData().drawCpuData;
 }
 
-void TimelineItemCpuData::HeaderExtraContents( const TimelineContext &ctx, int offset, float labelWidth )
+void TimelineItemCpuData::HeaderExtraContents( const TimelineContext &ctx, int offset, float &xOffset )
 {
-	auto draw = ImGui::GetWindowDrawList();
-	const auto ty = ImGui::GetTextLineHeight();
+    auto draw = ImGui::GetWindowDrawList();
+    const auto ty = ImGui::GetTextLineHeight();
+    const float ItemSpacing = ImGui::GetStyle().ItemSpacing.x;
 
-	const auto color = m_drawThreadInteractions ? 0xFFAA9999 : 0x88AA7777;
-	draw->AddText( ctx.wpos + ImVec2( 1.5f * ty + labelWidth, offset ), color, ICON_FA_DIAGRAM_PREDECESSOR );
-	float iconSz = ImGui::CalcTextSize( ICON_FA_DIAGRAM_PREDECESSOR ).x;
+    const auto color = m_drawThreadInteractions ? 0xFFAA9999 : 0x88AA7777;
+    draw->AddText( ctx.wpos + ImVec2( xOffset, offset ), color, ICON_FA_DIAGRAM_PREDECESSOR );
+    float iconSz = ImGui::CalcTextSize( ICON_FA_DIAGRAM_PREDECESSOR ).x;
 
-	if ( ctx.hover && ImGui::IsMouseHoveringRect( ctx.wpos + ImVec2( 1.5f * ty + labelWidth, offset ), ctx.wpos + ImVec2( 1.5f * ty + labelWidth + iconSz, offset + ty ) ) )
-	{
-		ImGui::BeginTooltip();
-		TextDisabledUnformatted( ( m_drawThreadInteractions ? "Hide thread interactions" : "Show thread interactions" ) );
-		ImGui::EndTooltip();
-		
-		if ( IsMouseClicked( 0 ) )
-		{
-			m_drawThreadInteractions = !m_drawThreadInteractions;
-		}
-	}
+    if ( ctx.hover && ImGui::IsMouseHoveringRect( ctx.wpos + ImVec2( xOffset, offset ), ctx.wpos + ImVec2( xOffset + iconSz, offset + ty ) ) )
+    {
+        ImGui::BeginTooltip();
+        TextDisabledUnformatted( ( m_drawThreadInteractions ? "Hide thread interactions" : "Show thread interactions" ) );
+        ImGui::EndTooltip();
+
+        if ( IsMouseClicked( 0 ) )
+        {
+            m_drawThreadInteractions = !m_drawThreadInteractions;
+        }
+    }
+    xOffset += iconSz + ItemSpacing;
 }
 
 bool TimelineItemCpuData::IsEmpty() const

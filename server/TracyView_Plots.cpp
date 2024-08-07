@@ -13,8 +13,19 @@ namespace tracy
 
 constexpr int PlotHeightPx = 100;
 
+static const char *FormatPlotAxisMinMax( double val, PlotValueFormatting format )
+{
+    if ( format == PlotValueFormatting::Number )
+    {
+        // Limit to 5 significant figures
+        static char buf[ 32 ];
+        sprintf( buf, "%.5g", val );
+        return buf;
+    }
+    return FormatPlotValue( val, format );
+}
 
-bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vector<uint32_t>& plotDraw, int& offset, double fixedMax, bool bMultiPlot )
+bool View::DrawPlot( const TimelineContext &ctx, PlotData &plot, const std::vector<uint32_t> &plotDraw, uint32_t iBegin, uint32_t iEnd, int &offset, double yAxisMax, uint32_t flags, int height )
 {
     auto draw = ImGui::GetWindowDrawList();
     const auto& wpos = ctx.wpos;
@@ -24,13 +35,13 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
     const auto hover = ctx.hover;
     const auto ty = ctx.ty;
 
-    const auto PlotHeight = PlotHeightPx * GetScale();
+    const auto PlotHeight = ( height > 0 ) ? height : (PlotHeightPx * GetScale());
 
     auto yPos = wpos.y + offset;
     if( yPos + PlotHeight >= ctx.yMin && yPos <= ctx.yMax )
     {
         auto min = plot.rMin;
-        auto max = plot.rMax;
+        auto max = yAxisMax;
 
         auto pvit = m_plotView.find( &plot );
         if( pvit == m_plotView.end() )
@@ -57,9 +68,7 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             max = pv.max;
         }
 
-        if ( fixedMax > -1 ) max = fixedMax;
-
-        if ( plot.type == PlotType::Zone || plot.type == PlotType::AdditionalZone )
+        if ( plot.type == PlotType::Zone )
         {
             min = 0.0;
         }
@@ -69,7 +78,7 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
 
         ImGui::PushClipRect( ImVec2( dpos.x, yPos ), ImVec2( dpos.x + w, yPos + PlotHeight ), true );
 
-        if ( plot.type != PlotType::AdditionalZone )
+        if ( flags & DrawPlotFlags::AddBackground )
         {
             const auto bg = 0x22000000 | ( DarkenColorMore( color ) & 0xFFFFFF );
             draw->AddRectFilled( ImVec2( dpos.x, yPos ), ImVec2( dpos.x + w, yPos + PlotHeight ), bg );
@@ -77,15 +86,14 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
 
         const auto revrange = 1.0 / ( max - min );
 
-        auto it = plotDraw.begin();
-        auto end = plotDraw.end();
+        uint32_t iDraw = iBegin;
         double px, py;
         bool first = true;
-        while( it < end )
+        while( iDraw < iEnd )
         {
             auto& vec = plot.data;
-            const auto cnt = *it++;
-            const auto i0 = *it++;
+            const auto cnt = plotDraw[iDraw++];
+            const auto i0 = plotDraw[iDraw++];
             const auto& v0 = vec[i0];
             double x = ( v0.time.Val() - m_vd.zvStart ) * pxns;
             double y = PlotHeight - ( v0.val - min ) * revrange * PlotHeight;
@@ -96,34 +104,47 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             }
             else
             {
-                if( plot.showSteps )
-                {
-                    if( plot.fill )
-                    {
-                        draw->AddRectFilled( dpos + ImVec2( px, offset + PlotHeight ), dpos + ImVec2( x, offset + py ), fill );
-                    }
-                    const ImVec2 data[3] = { dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + py ), dpos + ImVec2( x, offset + y ) };
-                    draw->AddPolyline( data, 3, color, 0, 1.0f );
-                }
-                else
-                {
-                    if( plot.fill )
-                    {
-                        draw->AddQuadFilled( dpos + ImVec2( px, offset + PlotHeight ), dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + y ), dpos + ImVec2( x, offset + PlotHeight ), fill );
-                    }
-                    DrawLine( draw, dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + y ), color );
-                }
+				switch ( plot.drawType )
+				{
+				case PlotDrawType::Line:
+				{
+					if ( plot.fill )
+					{
+						draw->AddQuadFilled( dpos + ImVec2( px, offset + PlotHeight ), dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + y ), dpos + ImVec2( x, offset + PlotHeight ), fill );
+					}
+					DrawLine( draw, dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + y ), color );
+					break;
+				}
+				case PlotDrawType::Step:
+				{
+					if ( plot.fill )
+					{
+						draw->AddRectFilled( dpos + ImVec2( px, offset + PlotHeight ), dpos + ImVec2( x, offset + py ), fill );
+					}
+					const ImVec2 data[ 3 ] = { dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + py ), dpos + ImVec2( x, offset + y ) };
+					draw->AddPolyline( data, 3, color, 0, 1.0f );
+					break;
+				}
+				case PlotDrawType::Bar:
+				{
+					DrawLine( draw, dpos + ImVec2( x, offset + PlotHeight ), dpos + ImVec2( x, offset + y ), color );
+					break;
+				}
+				default:
+					assert( false );
+					break;
+				}
             }
 
             if( cnt == 0 )
             {
                 if( i0 == 0 )
                 {
-                    DrawPlotPoint( wpos, x, y, offset, color, hover, false, v0, 0, plot.type, plot.format, PlotHeight, plot.name, bMultiPlot );
+                    DrawPlotPoint( wpos, x, y, offset, color, hover, false, v0, 0, plot.type, plot.format, PlotHeight, plot.name, flags & DrawPlotFlags::MultiPlot );
                 }
                 else
                 {
-                    DrawPlotPoint( wpos, x, y, offset, color, hover, true, v0, vec[i0-1].val, plot.type, plot.format, PlotHeight, plot.name, bMultiPlot );
+                    DrawPlotPoint( wpos, x, y, offset, color, hover, true, v0, vec[i0-1].val, plot.type, plot.format, PlotHeight, plot.name, flags & DrawPlotFlags::MultiPlot );
                 }
                 px = x;
                 py = y;
@@ -135,8 +156,8 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
                 const auto& v1 = vec[i1];
                 px = x;
                 py = PlotHeight - ( v1.val - min ) * revrange * PlotHeight;
-                const auto imin = *it++;
-                const auto imax = *it++;
+                const auto imin = plotDraw[ iDraw++ ];
+                const auto imax = plotDraw[ iDraw++ ];
                 const auto vmin = vec[imin].val;
                 const auto vmax = vec[imax].val;
                 const auto ymin = offset + PlotHeight - ( vmin - min ) * revrange * PlotHeight;
@@ -188,12 +209,12 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
             }
         }
 
-        if ( plot.type != PlotType::AdditionalZone )
+        if ( flags & DrawPlotFlags::AddBackground )
         {
-            auto tmp = FormatPlotValue( max, plot.format );
+            auto tmp = FormatPlotAxisMinMax( max, plot.format );
             DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
             offset += PlotHeight - ty;
-            tmp = FormatPlotValue( min, plot.format );
+            tmp = FormatPlotAxisMinMax( min, plot.format );
             DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
         }
         else
@@ -206,9 +227,9 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
 
         if( plot.type == PlotType::Memory )
         {
-            auto& mem = m_worker.GetMemoryNamed( plot.name );
+            auto& mem = m_worker.GetMemoryNamed( plot.name.str );
 
-            if( m_memoryAllocInfoPool == plot.name && m_memoryAllocInfoWindow >= 0 )
+            if( m_memoryAllocInfoPool == plot.name.str && m_memoryAllocInfoWindow >= 0 )
             {
                 const auto& ev = mem.data[m_memoryAllocInfoWindow];
 
@@ -220,7 +241,7 @@ bool View::DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vect
                 draw->AddRectFilled( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x2288DD88 );
                 draw->AddRect( ImVec2( wpos.x + px0, yPos ), ImVec2( wpos.x + px1, yPos + PlotHeight ), 0x4488DD88 );
             }
-            if( m_memoryAllocHover >= 0 && m_memoryAllocHoverPool == plot.name && ( m_memoryAllocInfoPool != plot.name || m_memoryAllocHover != m_memoryAllocInfoWindow ) )
+            if( m_memoryAllocHover >= 0 && m_memoryAllocHoverPool == plot.name.str && ( m_memoryAllocInfoPool != plot.name.str || m_memoryAllocHover != m_memoryAllocInfoWindow ) )
             {
                 const auto& ev = mem.data[m_memoryAllocHover];
 
@@ -267,7 +288,7 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
     }
 }
 
-void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name, bool bMultiPlot )
+void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, StringRef &name, bool bMultiPlot )
 {
     auto draw = ImGui::GetWindowDrawList();
     draw->AddRect( wpos + ImVec2( x - 1.5f, offset + y - 1.5f ), wpos + ImVec2( x + 2.5f, offset + y + 2.5f ), color );
@@ -309,7 +330,7 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
 
             if( type == PlotType::Memory )
             {
-                auto& mem = m_worker.GetMemoryNamed( name );
+                auto& mem = m_worker.GetMemoryNamed( name.str );
                 const MemEvent* ev = nullptr;
                 if( change > 0 )
                 {
@@ -375,11 +396,11 @@ void View::DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint
                     }
                     m_memoryAllocHover = std::distance( mem.data.begin(), ev );
                     m_memoryAllocHoverWait = 2;
-                    m_memoryAllocHoverPool = name;
+                    m_memoryAllocHoverPool = name.str;
                     if( IsMouseClicked( 0 ) )
                     {
                         m_memoryAllocInfoWindow = m_memoryAllocHover;
-                        m_memoryAllocInfoPool = name;
+                        m_memoryAllocInfoPool = name.str;
                     }
                 }
             }

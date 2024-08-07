@@ -13,6 +13,9 @@ void EventDebug( const QueueItem& ev )
     static FILE* f = fopen( "eventdebug.txt", "wb" );
     switch( ev.hdr.type )
     {
+    case QueueType::SyncValidation:
+        fprintf( f, "ev %i (SyncValidation)\n", ev.hdr.idx );
+        break;
     case QueueType::ZoneText:
         fprintf( f, "ev %i (ZoneText)\n", ev.hdr.idx );
         break;
@@ -68,6 +71,12 @@ void EventDebug( const QueueItem& ev )
     case QueueType::ZoneEnd:
         fprintf( f, "ev %i (ZoneEnd)\n", ev.hdr.idx );
         fprintf( f, "\ttime = %" PRIi64 "\n", ev.zoneEnd.time );
+        break;
+    case QueueType::GlobalLockSyncBegin:
+        fprintf( f, "ev %i (GlobalLockSyncBegin)\n", ev.hdr.idx );
+        break;
+    case QueueType::GlobalLockSyncEnd:
+        fprintf( f, "ev %i (GlobalLockSyncEnd)\n", ev.hdr.idx );
         break;
     case QueueType::LockWait:
         fprintf( f, "ev %i (LockWait)\n", ev.hdr.idx );

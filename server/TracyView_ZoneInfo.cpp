@@ -9,7 +9,6 @@
 namespace tracy
 {
 
-extern bool g_bAutoZoneStats;
 extern double s_time;
 
 template<typename T>
@@ -313,7 +312,7 @@ void View::DrawZoneInfoWindow()
             if( !slz.zones.empty() )
             {
 				ImGui::SameLine();
-				ImGui::Checkbox( "AutoStats", &tracy::g_bAutoZoneStats );
+				ImGui::Checkbox( "AutoStats", &m_vd.autoZoneStats );
 
                 static int16_t sOldSrcLoc = -1;
 				ImGui::SameLine();
@@ -323,7 +322,7 @@ void View::DrawZoneInfoWindow()
 					sOldSrcLoc = -1;
 				}
 				
-				if ( tracy::g_bAutoZoneStats )
+				if ( m_vd.autoZoneStats )
 				{
   					if ( sOldSrcLoc != sl )
 					{
@@ -1857,13 +1856,12 @@ void View::ShowZoneInfo( const GpuEvent& ev, uint64_t thread )
     }
 }
 
-void View::ZoneTooltip( const ZoneEvent& ev )
+void View::ZoneTooltipClamped( const ZoneEvent& ev, int64_t start, int64_t end )
 {
     const auto tid = GetZoneThread( ev );
     auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
-    const auto end = m_worker.GetZoneEnd( ev );
-    const auto ztime = end - ev.Start();
-    const auto selftime = GetZoneSelfTime( ev );
+    const auto ztime = end - start;
+    const auto selftime = GetZoneSelfTimeClamped( ev, start, end );
 
     ImGui::BeginTooltip();
     if( m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).name.Active() )
@@ -1933,7 +1931,86 @@ void View::ZoneTooltip( const ZoneEvent& ev )
         ImGui::NewLine();
         TextColoredUnformatted( ImVec4( 0xCC / 255.f, 0xCC / 255.f, 0x22 / 255.f, 1.f ), m_worker.GetString( m_worker.GetZoneExtra( ev ).text ) );
     }
+
+    ImGui::Separator();
+    TextFocused( "Start time:", TimeToStringExact( start ) );
+    TextFocused( "End time:", TimeToStringExact( end ) );
     ImGui::EndTooltip();
+}
+
+void View::CpuZoneRangeTooltip( int64_t start, int64_t end, uint32_t coreIndex, uint64_t tid )
+{
+    const char *program = "";
+    bool local = false;
+    bool untracked = true;
+    const char* label = GetThreadContextData( tid, local, untracked, program );
+    if ( !local && ( tid == 0 ) )
+    {
+        program = "System Idle Process";
+        label = "Idle";
+    }
+
+    auto tt = m_worker.GetThreadTopology( coreIndex );
+    ImGui::BeginTooltip();
+    TextFocused( "CPU:", RealToString( coreIndex ) );
+    if( tt )
+    {
+        ImGui::SameLine();
+        ImGui::Spacing();
+        ImGui::SameLine();
+        TextFocused( "Package:", RealToString( tt->package ) );
+        ImGui::SameLine();
+        TextFocused( "Core:", RealToString( tt->core ) );
+    }
+    if( local )
+    {
+        TextFocused( "Program:", m_worker.GetCaptureProgram().c_str() );
+        ImGui::SameLine();
+        TextDisabledUnformatted( "(profiled program)" );
+        SmallColorBox( GetThreadColor( tid, 0 ) );
+        ImGui::SameLine();
+        TextFocused( "Thread:", m_worker.GetThreadName( tid ) );
+        ImGui::SameLine();
+        ImGui::TextDisabled( "(%s)", RealToString( tid ) );
+        m_drawThreadMigrations = tid;
+        m_cpuDataThread = tid;
+    }
+    else
+    {
+        if( untracked )
+        {
+            TextFocused( "Program:", m_worker.GetCaptureProgram().c_str() );
+        }
+        else
+        {
+            TextFocused( "Program:", program );
+        }
+        ImGui::SameLine();
+        if( untracked )
+        {
+            TextDisabledUnformatted( "(untracked thread in profiled program)" );
+        }
+        else
+        {
+            TextDisabledUnformatted( "(external)" );
+        }
+        TextFocused( "Thread:", ( tid != 0 ) ? m_worker.GetExternalName( tid ).second : label );
+        ImGui::SameLine();
+        ImGui::TextDisabled( "(%s)", RealToString( tid ) );
+    }
+    ImGui::Separator();
+    TextFocused( "Start time:", TimeToStringExact( start ) );
+    TextFocused( "End time:", TimeToStringExact( end ) );
+    TextFocused( "Activity time:", TimeToStringExact( end - start ) );
+
+    ImGui::EndTooltip();
+}
+
+void View::ZoneTooltip( const ZoneEvent &ev )
+{
+    const int64_t start = ev.Start();
+    const int64_t end = m_worker.GetZoneEnd( ev );
+    ZoneTooltipClamped( ev, start, end );
 }
 
 void View::ZoneTooltip( const GpuEvent& ev )

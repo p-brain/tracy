@@ -92,6 +92,7 @@
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <FloatingPointModel>Fast</FloatingPointModel>
       <DisableSpecificWarnings>5055</DisableSpecificWarnings>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -119,6 +120,7 @@
     <ClCompile Include="..\..\..\public\common\tracy_lz4hc.cpp" />
     <ClCompile Include="..\..\..\server\TracyBadVersion.cpp" />
     <ClCompile Include="..\..\..\server\TracyColor.cpp" />
+    <ClCompile Include="..\..\..\server\TracyCpuZoneBuffer.cpp" />
     <ClCompile Include="..\..\..\server\TracyFileselector.cpp" />
     <ClCompile Include="..\..\..\server\TracyFilesystem.cpp" />
     <ClCompile Include="..\..\..\server\TracyImGui.cpp" />
@@ -138,10 +140,12 @@
     <ClCompile Include="..\..\..\server\TracyThreadCompress.cpp" />
     <ClCompile Include="..\..\..\server\TracyTimelineController.cpp" />
     <ClCompile Include="..\..\..\server\TracyTimelineItem.cpp" />
+    <ClCompile Include="..\..\..\server\TracyTimelineItemCore.cpp" />
     <ClCompile Include="..\..\..\server\TracyTimelineItemCpuData.cpp" />
     <ClCompile Include="..\..\..\server\TracyTimelineItemGpu.cpp" />
     <ClCompile Include="..\..\..\server\TracyTimelineItemPlot.cpp" />
     <ClCompile Include="..\..\..\server\TracyTimelineItemThread.cpp" />
+    <ClCompile Include="..\..\..\server\TracyTimelinePreprocessor.cpp" />
     <ClCompile Include="..\..\..\server\TracyUserData.cpp" />
     <ClCompile Include="..\..\..\server\TracyUtility.cpp" />
     <ClCompile Include="..\..\..\server\TracyView.cpp" />
@@ -254,6 +258,7 @@
     <ClInclude Include="..\..\..\server\TracyBuzzAnim.hpp" />
     <ClInclude Include="..\..\..\server\TracyCharUtil.hpp" />
     <ClInclude Include="..\..\..\server\TracyColor.hpp" />
+    <ClInclude Include="..\..\..\server\TracyCpuZoneBuffer.hpp" />
     <ClInclude Include="..\..\..\server\TracyDecayValue.hpp" />
     <ClInclude Include="..\..\..\server\TracyEvent.hpp" />
     <ClInclude Include="..\..\..\server\TracyFileHeader.hpp" />
@@ -284,9 +289,11 @@
     <ClInclude Include="..\..\..\server\TracyThreadCompress.hpp" />
     <ClInclude Include="..\..\..\server\TracyTimelineController.hpp" />
     <ClInclude Include="..\..\..\server\TracyTimelineItem.hpp" />
+    <ClInclude Include="..\..\..\server\TracyTimelineItemCore.hpp" />
     <ClInclude Include="..\..\..\server\TracyTimelineItemCpuData.hpp" />
     <ClInclude Include="..\..\..\server\TracyTimelineItemGpu.hpp" />
     <ClInclude Include="..\..\..\server\TracyTimelineItemPlot.hpp" />
+    <ClInclude Include="..\..\..\server\TracyTimelinePreprocessor.hpp" />
     <ClInclude Include="..\..\..\server\TracyTimelineItemThread.hpp" />
     <ClInclude Include="..\..\..\server\TracyUserData.hpp" />
     <ClInclude Include="..\..\..\server\TracyUtility.hpp" />

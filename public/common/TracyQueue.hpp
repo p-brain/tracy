@@ -9,6 +9,8 @@ namespace tracy
 
 enum class QueueType : uint8_t
 {
+    SyncValidation,
+
     ZoneText,
     ZoneName,
     Message,
@@ -81,9 +83,12 @@ enum class QueueType : uint8_t
     FrameMarkMsgEnd,
     FrameVsync,
     SourceLocation,
+    GlobalLockSyncBegin,
+    GlobalLockSyncEnd,
     LockAnnounce,
     LockTerminate,
     LockMark,
+    LockMarkFileLine,
     MessageLiteral,
     MessageLiteralColor,
     MessageLiteralCallstack,
@@ -125,6 +130,13 @@ enum class QueueType : uint8_t
 };
 
 #pragma pack( push, 1 )
+
+struct QueueSyncValidation
+{
+    uint32_t threadCtx;
+    int64_t refTimeThread;
+    int64_t refTimeSerial;
+};
 
 struct QueueThreadContext
 {
@@ -246,6 +258,18 @@ enum class LockType : uint8_t
     SharedLockable
 };
 
+struct QueueGlobalLockSyncBegin
+{
+    uint32_t count;
+    uint32_t active;
+};
+
+struct QueueGlobalLockSyncEnd
+{
+    uint32_t count;
+    uint32_t active;
+};
+
 struct QueueLockAnnounce
 {
     uint32_t id;
@@ -303,6 +327,14 @@ struct QueueLockMark
     uint32_t thread;
     uint32_t id;
     uint64_t srcloc;    // ptr
+};
+
+struct QueueLockMarkFileLine
+{
+    uint32_t thread;
+    uint32_t id;
+    uint64_t file;    // ptr
+    int32_t line;
 };
 
 struct QueueLockName
@@ -638,11 +670,21 @@ struct QueueSourceCodeNotAvailable
     uint32_t id;
 };
 
+enum class CpuType : uint32_t
+{
+    Normal = 0,
+    IntelPCore,
+    IntelECore,
+
+    Count,
+};
+
 struct QueueCpuTopology
 {
     uint32_t package;
     uint32_t core;
     uint32_t thread;
+    CpuType type;
 };
 
 struct QueueExternalNameMetadata
@@ -680,6 +722,8 @@ struct QueueItem
     QueueHeader hdr;
     union
     {
+        QueueSyncValidation syncValidation;
+
         QueueThreadContext threadCtx;
         QueueZoneBegin zoneBegin;
         QueueZoneBeginLean zoneBeginLean;
@@ -700,6 +744,8 @@ struct QueueItem
         QueueSourceLocation srcloc;
         QueueZoneTextFat zoneTextFat;
         QueueZoneTextFatThread zoneTextFatThread;
+        QueueGlobalLockSyncBegin globalSyncBegin;
+        QueueGlobalLockSyncEnd globalSyncEnd;
         QueueLockAnnounce lockAnnounce;
         QueueLockTerminate lockTerminate;
         QueueLockWait lockWait;
@@ -707,6 +753,7 @@ struct QueueItem
         QueueLockRelease lockRelease;
         QueueLockReleaseShared lockReleaseShared;
         QueueLockMark lockMark;
+        QueueLockMarkFileLine lockMarkFileLine;
         QueueLockName lockName;
         QueueLockNameFat lockNameFat;
         QueuePlotDataInt plotDataInt;
@@ -770,6 +817,7 @@ struct QueueItem
 enum { QueueItemSize = sizeof( QueueItem ) };
 
 static constexpr size_t QueueDataSize[] = {
+    sizeof( QueueHeader ) + sizeof( QueueSyncValidation ),
     sizeof( QueueHeader ),                                  // zone text
     sizeof( QueueHeader ),                                  // zone name
     sizeof( QueueHeader ) + sizeof( QueueMessage ),
@@ -843,9 +891,12 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueFrameMark ),       // end
     sizeof( QueueHeader ) + sizeof( QueueFrameVsync ),
     sizeof( QueueHeader ) + sizeof( QueueSourceLocation ),
+    sizeof( QueueHeader ) + sizeof( QueueGlobalLockSyncBegin ),
+    sizeof( QueueHeader ) + sizeof( QueueGlobalLockSyncEnd ),
     sizeof( QueueHeader ) + sizeof( QueueLockAnnounce ),
     sizeof( QueueHeader ) + sizeof( QueueLockTerminate ),
     sizeof( QueueHeader ) + sizeof( QueueLockMark ),
+    sizeof( QueueHeader ) + sizeof( QueueLockMarkFileLine ),
     sizeof( QueueHeader ) + sizeof( QueueMessageLiteral ),
     sizeof( QueueHeader ) + sizeof( QueueMessageColorLiteral ),
     sizeof( QueueHeader ) + sizeof( QueueMessageLiteral ),  // callstack

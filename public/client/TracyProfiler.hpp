@@ -12,6 +12,7 @@
 #include "TracyCallstack.hpp"
 #include "TracySysPower.hpp"
 #include "TracySysTime.hpp"
+#include "TracySysTrace.hpp"
 #include "TracyFastVector.hpp"
 #include "../common/TracyQueue.hpp"
 #include "../common/TracyAlign.hpp"
@@ -56,6 +57,12 @@ TRACY_API bool IsProfilerStarted();
 #else
 #  define TracyIsStarted true
 #endif
+
+
+#if defined(TRACY_HAS_CALLSTACK) || defined(TRACY_HAS_SYSTEM_TRACING)
+#   define TRACY_NEEDS_SYMBOL_WORKER
+#endif
+
 
 // Profiled programs will not automatically broadcast their presence to Tracy and 
 // not automatically listen for incoming connections. This is to stop having firewall
@@ -164,6 +171,8 @@ struct LuaZoneState
 typedef void(*ParameterCallback)( void* data, uint32_t idx, int32_t val );
 typedef char*(*SourceContentsCallback)( void* data, const char* filename, size_t& size );
 
+struct LockItemContainer;
+
 class Profiler
 {
     struct FrameImageQueueItem
@@ -186,6 +195,7 @@ class Profiler
 
     struct SymbolQueueItem
     {
+        uint64_t connectionId;
         SymbolQueueItemType type;
         uint64_t ptr;
         uint64_t extra;
@@ -731,6 +741,15 @@ public:
 		return m_listenPort;
 	}
 
+    void LockAnnounce( volatile void* pLockId, const SourceLocationData* pSrcloc, const char* name, size_t len );
+    void LockTerminate( volatile void* pLockId );
+    void LockSetName( volatile void* pLockId, const char* name, size_t len );
+
+    void LockWaitBegin( volatile void* pLockId, const char* file, int line );
+    void LockAcquired( volatile void* pLockId, const char* file, int line );
+    void LockAcquiredTry( volatile void* pLockId, const char* file, int line );
+    void LockReleased( volatile void* pLockId, const char* file, int line );
+
 #ifdef TRACY_ON_DEMAND
     tracy_force_inline uint64_t ConnectionId() const
     {
@@ -743,6 +762,11 @@ public:
         auto dst = m_deferredQueue.push_next();
         memcpy( dst, &item, sizeof( item ) );
         m_deferredLock.unlock();
+    }
+#else
+    tracy_force_inline uint64_t ConnectionId() const
+    {
+        return 0;
     }
 #endif
 
@@ -814,7 +838,7 @@ private:
     void CompressWorker();
 #endif
 
-#ifdef TRACY_HAS_CALLSTACK
+#if defined(TRACY_NEEDS_SYMBOL_WORKER)
     static void LaunchSymbolWorker( void* ptr ) { ((Profiler*)ptr)->SymbolWorker(); }
     void SymbolWorker();
     void HandleSymbolQueueItem( const SymbolQueueItem& si );
@@ -981,7 +1005,9 @@ private:
     TracyMutex m_fiLock;
 #endif
 
+#if defined(TRACY_NEEDS_SYMBOL_WORKER)
     SPSCQueue<SymbolQueueItem> m_symbolQueue;
+#endif
 
     std::atomic<uint64_t> m_frameCount;
 public:
@@ -995,6 +1021,11 @@ private:
     TracyMutex m_deferredLock;
     FastVector<QueueItem> m_deferredQueue;
 #endif
+
+    LockItemContainer *m_lockItems;
+    void LockItemContainerNew();
+    void LockItemContainerDestroy();
+    uint32_t GetLockConnectionId() const;
 
 #ifdef TRACY_HAS_SYSTIME
     void ProcessSysTime();
@@ -1014,9 +1045,11 @@ private:
     SourceContentsCallback m_sourceCallback;
     void* m_sourceCallbackData;
 
+#if defined(TRACY_NEEDS_SYMBOL_WORKER)
     char* m_queryImage;
     char* m_queryData;
     char* m_queryDataPtr;
+#endif
 
 #if defined _WIN32
     void* m_exceptionHandler;

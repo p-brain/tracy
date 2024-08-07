@@ -23,7 +23,35 @@ static tracy_force_inline uint32_t MixGhostColor( uint32_t c0, uint32_t c1 )
         ( ( ( ( ( c0 & 0x000000FF )       ) + 3 * ( ( c1 & 0x000000FF )       ) ) >> 2 )       );
 }
 
-void View::DrawThread( const TimelineContext& ctx, const ThreadData& thread, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, const std::vector<SamplesDraw>& samplesDraw, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, int& offset, int depth, bool _hasCtxSwitches, bool _hasSamples )
+void View::DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, int& offset, int depth )
+{
+    const auto& wpos = ctx.wpos;
+    const auto ty = ctx.ty;
+    const auto ostep = ty + 1;
+    const auto yMin = ctx.yMin;
+    const auto yMax = ctx.yMax;
+
+    const auto hasCtxSwitch = m_vd.drawContextSwitches;
+    const auto ctxOffset = offset;
+    if( hasCtxSwitch )
+    {
+        offset += round( ostep * 0.75f );
+    }
+
+    const auto yPos = wpos.y + offset;
+    if( !draw.empty() && yPos <= yMax && yPos + ostep * depth >= yMin )
+    {
+        DrawZoneList( ctx, draw, offset, coreIndex );
+    }
+    offset += ostep * depth;
+
+    if( hasCtxSwitch && !ctxDraw.empty() )
+    {
+        DrawContextSwitchList( ctx, coreIndex, ctxDraw, ctxOffset, offset, false );
+    }
+}
+
+void View::DrawThread( const TimelineContext &ctx, const ThreadData &thread, const std::vector<TimelineDraw> &draw, const std::vector<ContextSwitchDraw> &ctxDraw, const std::vector<SamplesDraw> &samplesDraw, const std::vector<std::unique_ptr<LockDraw>> &lockDraw, int &offset, int depth, bool _hasCtxSwitches, bool _hasSamples )
 {
     const auto& wpos = ctx.wpos;
     const auto ty = ctx.ty;
@@ -198,7 +226,7 @@ void View::DrawThreadOverlays( const ThreadData& thread, const ImVec2& ul, const
     }
 }
 
-void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int _offset, uint64_t tid )
+void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int _offset, uint64_t tidOrCoreIndex )
 {
     auto draw = ImGui::GetWindowDrawList();
     const auto w = ctx.w;
@@ -218,38 +246,51 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
         const auto yPos = wpos.y + offset;
         if( yPos > yMax || yPos + ostep < yMin ) continue;
 
+        uint64_t tid = tidOrCoreIndex;
         switch( v.type )
         {
         case TimelineDrawType::Folded:
         {
-            auto& ev = *(const ZoneEvent*)v.ev.get();
+            const int64_t rstart = v.rstart.Val();
+            const int64_t rend = v.rend.Val();
+            const ZoneEvent* pEvent = (const ZoneEvent*)v.ev.get();
+            if ( (pEvent != nullptr) && (( v.subtype == TimelineDrawSubType::Thread ) || ( v.num <= 1 )) )
+            {
+                tid = GetZoneThread( *pEvent );
+            }
+
             const auto color = m_vd.dynamicColors == 2 ? 0xFF666666 : GetThreadColor( tid, v.depth );
-            const auto rend = v.rend.Val();
-            const auto px0 = ( ev.Start() - vStart ) * pxns;
+            const auto px0 = ( rstart - vStart ) * pxns;
             const auto px1 = ( rend - vStart ) * pxns;
             draw->AddRectFilled( wpos + ImVec2( std::max( px0, -10.0 ), offset ), wpos + ImVec2( std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), offset + ty ), color );
             DrawZigZag( draw, wpos + ImVec2( 0, offset + ty/2 ), std::max( px0, -10.0 ), std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), ty/4, DarkenColor( color ) );
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( std::max( px0, -10.0 ), offset ), wpos + ImVec2( std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), offset + ty + 1 ) ) )
             {
-                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.Start(), rend, true };
+                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { rstart, rend, true, nullptr };
                 if( v.num > 1 )
                 {
                     ImGui::BeginTooltip();
                     TextFocused( "Zones too small to display:", RealToString( v.num ) );
                     ImGui::Separator();
-                    TextFocused( "Execution time:", TimeToString( rend - ev.Start() ) );
+                    TextFocused( "Merged time:", TimeToString( rend - rstart ) );
+                    ImGui::Separator();
+                    TextFocused( "Start time:", TimeToStringExact( rstart ) );
+                    TextFocused( "End time:", TimeToStringExact( rend ) );
                     ImGui::EndTooltip();
 
-                    if( IsMouseClicked( 2 ) && rend - ev.Start() > 0 )
+                    if( IsMouseClicked( 2 ) && rend - rstart > 0 )
                     {
-                        ZoomToRange( ev.Start(), rend );
+                        ZoomToRange( rstart, rend );
                     }
                 }
                 else
                 {
-                    ZoneTooltip( ev );
+                    assert( pEvent );
+                    const ZoneEvent& ev = *pEvent;
 
-                    if( IsMouseClicked( 2 ) && rend - ev.Start() > 0 )
+                    ZoneTooltipClamped( ev, rstart, rend );
+
+                    if( IsMouseClicked( 2 ) && rend - rstart > 0 )
                     {
                         ZoomToZone( ev );
                     }
@@ -281,12 +322,16 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
         }
         case TimelineDrawType::Zone:
         {
+            const int64_t rstart = v.rstart.Val();
+            const int64_t rend = v.rend.Val();
+
             auto& ev = *(const ZoneEvent*)v.ev.get();
-            const auto end = m_worker.GetZoneEnd( ev );
-            const auto zsz = std::max( ( end - ev.Start() ) * pxns, pxns * 0.5 );
+
+            const auto zsz = std::max( ( rend - rstart ) * pxns, pxns * 0.5 );
+            tid = GetZoneThread( ev );
             const auto zoneColor = GetZoneColorData( ev, tid, v.depth );
             const char* zoneName = m_worker.GetZoneName( ev );
-			const auto ztime = m_worker.GetZoneEnd( ev ) - ev.Start();
+            const auto ztime = rend - rstart;
 
             auto tsz = ImGui::CalcTextSize( zoneName );
             if( m_shortenName == ShortenName::Always || ( ( m_shortenName == ShortenName::NoSpace || m_shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) )
@@ -300,8 +345,8 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
 			zoneName = &zoneNameTime[ 0 ];
 			tsz = ImGui::CalcTextSize( zoneName );
 
-            const auto pr0 = ( ev.Start() - m_vd.zvStart ) * pxns;
-            const auto pr1 = ( end - m_vd.zvStart ) * pxns;
+            const auto pr0 = ( rstart - m_vd.zvStart ) * pxns;
+            const auto pr1 = ( rend - m_vd.zvStart ) * pxns;
             const auto px0 = std::max( pr0, -10.0 );
             const auto px1 = std::max( { std::min( pr1, double( w + 10 ) ), px0 + pxns * 0.5, px0 + MinVisSize } );
             draw->AddRectFilled( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), zoneColor.color );
@@ -329,14 +374,14 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
 				ImVec2 vPadding = ImVec2( zonePaddingPx, 0.0f );
 				if ( tsz.x < ( zsz - ( zonePaddingPx * 2.0f ) ) )
 				{
-					const auto x = ( ev.Start() - m_vd.zvStart ) * pxns + ( ( end - ev.Start() ) * pxns - tsz.x ) / 2;
+					const auto x = ( rstart - m_vd.zvStart ) * pxns + ( ( rend - rstart ) * pxns - tsz.x ) / 2;
 					if ( x < zonePaddingPx || x > w - tsz.x )
 					{
 						ImGui::PushClipRect( wpos + vPadding + ImVec2( px0, offset ), wpos - vPadding + ImVec2( px1, offset + tsz.y * 2 ), true );
 						DrawTextContrast( draw, wpos + ImVec2( std::max( std::max( double( zonePaddingPx ), px0 ), std::min( double( w - tsz.x ), x ) ), offset ), 0xFFFFFFFF, zoneName );
 						ImGui::PopClipRect();
 					}
-					else if ( ev.Start() == ev.End() )
+					else if ( rstart == rend )
 					{
 						DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
 					}
@@ -348,19 +393,19 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
 				else
 				{
 					ImGui::PushClipRect( wpos + vPadding + ImVec2( px0, offset ), wpos - vPadding + ImVec2( px1, offset + tsz.y * 2 ), true );
-					DrawTextContrast( draw, wpos + vPadding + ImVec2( std::max( int64_t( 0 ), ev.Start() - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
+					DrawTextContrast( draw, wpos + vPadding + ImVec2( std::max( int64_t( 0 ), rstart - m_vd.zvStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
 					ImGui::PopClipRect();
 				}
 			}
 
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
             {
-                ZoneTooltip( ev );
-                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.Start(), m_worker.GetZoneEnd( ev ), true };
+                ZoneTooltipClamped( ev, rstart, rend );
+                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { rstart, rend, true, &ev };
 
                 if( !m_zoomAnim.active && IsMouseClicked( 2 ) )
                 {
-                    ZoomToZone( ev );
+                    ZoomToRange( rstart, rend );
                 }
                 if( IsMouseClicked( 0 ) )
                 {
@@ -383,6 +428,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
 #ifndef TRACY_NO_STATISTICS
         case TimelineDrawType::GhostFolded:
         {
+            assert( v.subtype == TimelineDrawSubType::Thread );
             auto& ev = *(const GhostZone*)v.ev.get();
             const auto color = m_vd.dynamicColors == 2 ? 0xFF666666 : MixGhostColor( GetThreadColor( tid, v.depth ), 0x665555 );
             const auto rend = v.rend.Val();
@@ -392,7 +438,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
             DrawZigZag( draw, wpos + ImVec2( 0, offset + ty/2 ), std::max( px0, -10.0 ), std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), ty/4, DarkenColor( color ) );
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( std::max( px0, -10.0 ), offset ), wpos + ImVec2( std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), offset + ty + 1 ) ) )
             {
-                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.start.Val(), rend , true };
+                if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.start.Val(), rend , true, nullptr };
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted( "Multiple ghost zones" );
                 ImGui::Separator();
@@ -408,6 +454,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
         }
         case TimelineDrawType::Ghost:
         {
+            assert( v.subtype == TimelineDrawSubType::Thread );
             auto& ev = *(const GhostZone*)v.ev.get();
             const auto end = ev.end.Val();
             const auto zsz = std::max( ( end - ev.start.Val() ) * pxns, pxns * 0.5 );
@@ -477,7 +524,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
 
                 if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
                 {
-                    if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.start.Val(), ev.end.Val() , true };
+                    if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.start.Val(), ev.end.Val() , true, nullptr };
                     ImGui::BeginTooltip();
                     TextDisabledUnformatted( ICON_FA_GHOST " Ghost zone" );
                     ImGui::Separator();
@@ -559,7 +606,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
 
                 if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
                 {
-                    if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.start.Val(), ev.end.Val(), true };
+                    if( IsMouseClickReleased( 1 ) ) m_setRangePopup = RangeSlim { ev.start.Val(), ev.end.Val(), true, nullptr };
                     ImGui::BeginTooltip();
                     TextDisabledUnformatted( ICON_FA_GHOST " Ghost zone" );
                     if( sym.symAddr >> 63 != 0 )

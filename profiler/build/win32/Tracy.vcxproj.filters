@@ -386,7 +386,16 @@
     </ClCompile>
     <ClCompile Include="..\..\src\GetMainWindowHandle.cpp">
       <Filter>src</Filter>
-    </ClCompile>    
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelineItemCore.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyTimelinePreprocessor.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\server\TracyCpuZoneBuffer.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\server\TracyEvent.hpp">
@@ -784,7 +793,16 @@
     </ClInclude>
     <ClInclude Include="..\..\src\GetMainWindowHandle.h">
       <Filter>src</Filter>
-    </ClInclude>    
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelineItemCore.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyTimelinePreprocessor.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\server\TracyCpuZoneBuffer.hpp">
+      <Filter>server</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="DebugVis.natvis" />

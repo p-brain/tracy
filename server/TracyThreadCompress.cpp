@@ -32,7 +32,7 @@ void ThreadCompress::Load( FileRead& f )
         m_threadMap.reserve( sz );
         for( size_t i=0; i<sz; i++ )
         {
-            m_threadMap.emplace( m_threadExpand[i], i );
+            m_threadMap.emplace( m_threadExpand[i], (uint16_t)i );
         }
     }
 }
@@ -63,7 +63,7 @@ uint16_t ThreadCompress::CompressThreadNew( uint64_t thread )
 {
     auto sz = m_threadExpand.size();
     m_threadExpand.push_back( thread );
-    m_threadMap.emplace( thread, sz );
+    m_threadMap.emplace( thread, (uint16_t)sz );
     m_threadLast.first = thread;
     m_threadLast.second = sz;
     return sz;

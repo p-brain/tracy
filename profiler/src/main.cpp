@@ -62,14 +62,6 @@
 #include "HttpRequest.hpp"
 #include "IsElevated.hpp"
 #include "ImGuiContext.hpp"
-#define RAPIDJSON_HAS_STDSTRING 1
-#include "rapidjson/document.h"
-#include "rapidjson/reader.h"
-#include "rapidjson/prettywriter.h"
-#include "rapidjson/filereadstream.h"
-#include "rapidjson/filewritestream.h"
-#include "rapidjson/error/en.h"
-using namespace rapidjson;
 
 #include "../../server/helpers.h"
 
@@ -115,17 +107,6 @@ static uint32_t updateVersion = 0;
 static bool showReleaseNotes = false;
 static std::string releaseNotes;
 
-// Thread orders are accumulated and saved the the config file threadspriority.json
-// Loaded at startup, saved at close
-// Used to sort threads as new threads are added to the view.
-// Global list for all .tracys. Threads will fight it out. 
-
-namespace tracy
-{
-	std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-	bool g_bReApplyThreadOrder = false;
-	bool g_bAutoZoneStats = true;
-}
 static uint8_t* iconPx;
 static int iconX, iconY;
 static void* iconTex;
@@ -207,6 +188,7 @@ static void LoadConfig()
     int v;
     if( ini_sget( ini, "core", "threadedRendering", "%d", &v ) ) s_config.threadedRendering = v;
     if( ini_sget( ini, "timeline", "targetFps", "%d", &v ) && v >= 1 && v < 10000 ) s_config.targetFps = v;
+    if( ini_sget( ini, "locks", "keepSingleThreadLocks", "%d", &v ) ) s_config.keepSingleThreadLocks = v;
 
     ini_free( ini );
 }
@@ -222,6 +204,9 @@ static bool SaveConfig()
 
     fprintf( f, "\n[timeline]\n" );
     fprintf( f, "targetFps = %i\n", s_config.targetFps );
+
+    fprintf( f, "[locks]\n" );
+    fprintf( f, "keepSingleThreadLocks = %i\n", (int)s_config.keepSingleThreadLocks );
 
     fclose( f );
     return true;
@@ -302,41 +287,6 @@ int main( int argc, char** argv )
             argv += 2;
         }
     }
-
-    // Attempt to load saved data from glocal options
-
-    std::string filename = tracy::GetSavePath( "globaloptions.json" );
-    {
-        FILE* f = fopen( filename.c_str(), "r" );
-        if (f)
-        {
-            char readBuffer[ 65536 ];
-            FileReadStream is( f, readBuffer, sizeof( readBuffer ) );
-            Document d;
-            d.ParseStream( is );
-
-            if (d.HasMember( "ThreadOrder" ))
-            {
-                // Iterate members
-
-                const Value& ThreadOrder = d[ "ThreadOrder" ];
-
-                for (Value::ConstMemberIterator iter = ThreadOrder.MemberBegin(); iter != ThreadOrder.MemberEnd(); ++iter)
-                {
-                    tracy::g_MapThreadNameToPriority[ iter->name.GetString() ] = iter->value.GetInt();
-                }
-			}
-
-			if ( d.HasMember( "AutoZoneStats" ) )
-			{
-				const Value &rAutoZoneStats = d[ "AutoZoneStats" ];
-				tracy::g_bAutoZoneStats = rAutoZoneStats.GetBool();
-            }
-
-            fclose( f );
-        }
-    }
-
 
     ConnectionHistory connHistory;
     Filters filters;
@@ -425,45 +375,6 @@ int main( int argc, char** argv )
     free( iconPx );
 
     tracy::Fileselector::Shutdown();
-
-    // Write out some globaloptions
-
-    filename = tracy::GetSavePath( "globaloptions.json" );
-    {
-        {
-            FILE* f = fopen( filename.c_str(), "w" );
-            if (f)
-            {
-                Document d;
-                d.SetObject();
-
-                // Write out thread order
-
-                Value threadorder( kObjectType );
-                d.AddMember( "ThreadOrder", threadorder, d.GetAllocator() );
-
-                for (auto& it : tracy::g_MapThreadNameToPriority)
-                {
-                    d[ "ThreadOrder" ].AddMember( Value( kStringType ).SetString( it.first, d.GetAllocator() ), it.second, d.GetAllocator());
-                }
-
-                // Write out other options
-                
-				Value autoStats( tracy::g_bAutoZoneStats ? kTrueType : kFalseType );
-				d.AddMember( "AutoZoneStats", autoStats, d.GetAllocator() );
-
-                // Pretty write file
-
-                char writeBuffer[ 65536 ];
-                FileWriteStream os( f, writeBuffer, sizeof( writeBuffer ) );
-                PrettyWriter<FileWriteStream> writer( os );
-                d.Accept( writer );
-                fclose( f );
-            }
-
-        }
-
-    }
 
     return 0;
 }
@@ -635,7 +546,17 @@ static void DrawContents()
 #endif
 
     int display_w, display_h;
-    bptr->NewFrame( display_w, display_h );
+    //bptr->NewFrame( display_w, display_h );
+    //
+    // If we call bptr->NewFrame( display_w, display_h ); we need to call ImGui::NewFrame(), otherwise the ImGui delta time calculation is wrong.
+    // 
+    // bptr->NewFrame(), or rather ImGui_ImplGlfw_NewFrame(), directly *sets* ImGui::IO::DeltaTime,
+    // If we do not run ImGui::NewFrame() for each time we run bptr->NewFrame() we lose time information.
+    // This is a problem for timed input like double click.
+    //
+    // Moving to after the early out... seems to work but needs testing.
+    // Also, we cannot call ImGui::NewFrame() here instead, because that requires EndFrame() to be called, through Render(),
+    // however we want to avoid calling ImGui::Render() if we intend to sleep this frame.
 
     static int activeFrames = 3;
     if( tracy::WasActive() || !clients.empty() || ( view && view->WasActive() ) )
@@ -672,6 +593,7 @@ static void DrawContents()
     }
     activeFrames--;
 
+    bptr->NewFrame( display_w, display_h );
     ImGui::NewFrame();
     tracy::MouseFrame();
 
@@ -733,6 +655,16 @@ static void DrawContents()
                 int tmp = s_config.targetFps;
                 ImGui::SetNextItemWidth( 90 * dpiScale );
                 if( ImGui::InputInt( "##targetfps", &tmp ) ) { s_config.targetFps = std::clamp( tmp, 1, 9999 ); SaveConfig(); }
+
+                ImGui::TextUnformatted( "Keep terminated single thread locks" );
+                const char *cblabels[] = { "no", "yes" };
+                ImGui::Indent();
+                if( ImGui::Checkbox( cblabels[s_config.keepSingleThreadLocks], &s_config.keepSingleThreadLocks) )
+                {
+                    SaveConfig();
+                }
+                ImGui::Unindent();
+
                 ImGui::PopStyleVar();
                 ImGui::TreePop();
             }
@@ -1037,6 +969,10 @@ static void DrawContents()
                     {
                         tracy::TextFocused( "PID:", tracy::RealToString( v.second.pid ) );
                     }
+					if ( v.second.procName.ends_with( "FeeFee" ) )
+					{
+						tracy::TextColoredUnformatted( 0xFF5050FF, "Using InitializeToFeeFee for Memory initialization (likely connected to debugger, or a debug build). This will distort profiling results." );
+					}
                     ImGui::EndTooltip();
                 }
                 if( v.second.port != port )

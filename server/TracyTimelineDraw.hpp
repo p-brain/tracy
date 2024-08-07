@@ -17,12 +17,21 @@ enum class TimelineDrawType : uint8_t
     Ghost
 };
 
+enum TimelineDrawSubType : uint8_t
+{
+    Thread,
+    Core,
+};
+
 struct TimelineDraw
 {
     TimelineDrawType type;
+    TimelineDrawSubType subtype;
     uint16_t depth;
     short_ptr<void*> ev;
+    Int48 rstart;
     Int48 rend;
+    uint16_t comprTid;
     uint32_t num;
 };
 
@@ -89,6 +98,7 @@ struct LockDrawItem
     Int48 t1;
     LockState::Type state;
     uint32_t condensed;
+    uint32_t lockId;
     short_ptr<LockEventPtr> ptr, next;
 };
 
@@ -97,6 +107,9 @@ struct LockDraw
     uint32_t id;
     bool forceDraw;
     uint8_t thread;
+    bool terminated;
+    bool merged;
+    const LockMap* mergedLockMap;
     std::vector<LockDrawItem> data;
 };
 

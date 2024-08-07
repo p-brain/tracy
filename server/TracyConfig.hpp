@@ -8,6 +8,7 @@ struct Config
 {
     bool threadedRendering = true;
     int targetFps = 60;
+    bool keepSingleThreadLocks = false;
 };
 
 }

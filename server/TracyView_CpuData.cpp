@@ -14,6 +14,115 @@ constexpr float MinVisSize = 3;
 namespace tracy
 {
 
+struct ThreadStackInfo
+{
+    ZoneEvent ev;
+    int64_t count;
+    bool merged;
+};
+
+static void ExtractThreadStack( Worker &worker, int64_t vAt, int64_t vStart, int64_t vEnd, double nsPerPixel, const Vector<short_ptr<ZoneEvent>> &vec, int depth, Vector<ThreadStackInfo> &rStack );
+
+template<typename Adapter, typename V>
+static void ExtractThreadStack( Worker& worker, int64_t vAt, int64_t vStart, int64_t vEnd, double nsPerPixel, const V& vec, int depth, Vector<ThreadStackInfo>& rStack )
+{
+    auto it = std::lower_bound( vec.begin(), vec.end(), vStart, [&worker] ( const auto& l, const auto& r ) { Adapter a; return worker.GetZoneEnd( a(l) ) <= r; } );
+    if ( it == vec.end() )
+    {
+        return;
+    }
+
+    const auto zitend = std::lower_bound( it, vec.end(), vEnd, [] ( const auto& l, const auto& r ) { Adapter a; return a(l).Start() <= r; } );
+    if ( it == zitend )
+    {
+        return;
+    }
+
+    Adapter a;
+    if ( !a( *it ).IsEndValid() && worker.GetZoneEnd( a( *it ) ) < vStart )
+    {
+        return;
+    }
+
+    if ( worker.GetZoneEnd( a( *( zitend - 1 ) ) ) < vStart )
+    {
+        return;
+    }
+
+    const int64_t MinVisNs = int64_t( round( GetScale() * MinVisSize * nsPerPixel ) );
+
+    assert( it != zitend );
+    assert( worker.GetZoneEnd( a( *it ) ) >= vStart );
+    assert( a( *(zitend - 1) ).Start() <= vEnd );
+
+    const bool wasParentMerged = ( !rStack.empty() && ( rStack.back().merged ) );
+    const int64_t totalEventCount = ( zitend - it );
+
+    while( it < zitend )
+    {
+        const ZoneEvent &ev = a( *it );
+        const int64_t start = ev.Start();
+        const int64_t end = worker.GetZoneEnd( ev );
+        const int64_t zsz = end - ev.Start();
+        if ( wasParentMerged || ( ( zsz < MinVisNs ) && (totalEventCount > 1) ) )
+        {
+            const int64_t count = ( zitend - it );
+            if ( rStack.size() <= depth )
+            {
+                rStack.push_back( ThreadStackInfo{ ZoneEvent(), 0, false});
+            }
+            ThreadStackInfo &rInfo = rStack[ depth ];
+
+            rInfo.count += count;
+            rInfo.merged = true;
+
+            while ( it < zitend )
+            {
+                const ZoneEvent &innerev = a( *it );
+                assert( innerev.Start() <= std::min( end + MinVisNs, vEnd ) );
+                if ( innerev.HasChildren() )
+                {
+                    const Vector<short_ptr<ZoneEvent>> &children = worker.GetZoneChildren( innerev.Child() );
+                    ExtractThreadStack( worker, vAt, vStart, vEnd, nsPerPixel, children, depth + 1, rStack );
+                }
+
+                it++;
+            }
+
+            break;
+        }
+        else
+        {
+            if ( vAt >= start && vAt <= end )
+            {
+                rStack.push_back( ThreadStackInfo{ ev, 1, false});
+                if ( ev.HasChildren() )
+                {
+                    const Vector<short_ptr<ZoneEvent>> &children = worker.GetZoneChildren( ev.Child() );
+                    ExtractThreadStack( worker, vAt, vStart, vEnd, nsPerPixel, children, depth + 1, rStack );
+                }
+                break;
+            }
+            ++it;
+        }
+    }
+}
+
+
+static void ExtractThreadStack( Worker &worker, int64_t vAt, int64_t vStart, int64_t vEnd, double nsPerPixel, const Vector<short_ptr<ZoneEvent>> &vec, int depth, Vector<ThreadStackInfo>& rStack )
+{
+    if ( vec.is_magic() )
+    {
+        ExtractThreadStack<VectorAdapterDirect<ZoneEvent>>( worker, vAt, vStart, vEnd, nsPerPixel, *(Vector<ZoneEvent>*)( &vec ), depth, rStack );
+    }
+    else
+    {
+        ExtractThreadStack<VectorAdapterPointer<ZoneEvent>>( worker, vAt, vStart, vEnd, nsPerPixel, vec, depth, rStack );
+    }
+}
+
+
+
 bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDraw>& cpuDraw, const std::vector<std::vector<CpuCtxDraw>>& ctxDraw, int& offset, bool hasCpuData, bool drawThreadInteractions )
 {
     auto cpuData = m_worker.GetCpuData();
@@ -90,15 +199,8 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
                                 auto it = std::lower_bound( cs.begin(), cs.end(), mt, [] ( const auto& l, const auto& r ) { return (uint64_t)l.End() < (uint64_t)r; } );
                                 if( it != cs.end() && it->Start() <= mt && it->End() >= mt )
                                 {
-                                    auto tt = m_worker.GetThreadTopology( i );
-                                    if( tt )
-                                    {
-                                        ImGui::TextDisabled( "[%i:%i] CPU %i:", tt->package, tt->core, i );
-                                    }
-                                    else
-                                    {
-                                        ImGui::TextDisabled( "CPU %i:", i );
-                                    }
+                                    const std::string cpuName = m_worker.GetFormattedCpuName( i );
+                                    ImGui::TextDisabled( cpuName.c_str() );
                                     ImGui::SameLine();
                                     const auto thread = m_worker.DecompressThreadExternal( it->Thread() );
                                     bool local, untracked;
@@ -343,6 +445,52 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
                         TextFocused( "Start time:", TimeToStringExact( ev.Start() ) );
                         TextFocused( "End time:", TimeToStringExact( end ) );
                         TextFocused( "Activity time:", TimeToString( end - ev.Start() ) );
+
+                        if ( m_vd.viewContextSwitchStack && ( m_timeAtMouse >= 0 ) )
+                        {
+							const ThreadData* threadData = m_worker.GetThreadData( m_cpuDataThread );
+                            if ( threadData != nullptr )
+                            {
+                                int64_t vStart = m_timeAtMouse;
+                                int64_t vEnd = vStart;
+                                if ( m_nsPerPixel > 0 )
+                                {
+                                    vEnd += ( int64_t ) m_nsPerPixel;
+                                }
+
+                                Vector<ThreadStackInfo> stack;
+                                ExtractThreadStack(m_worker, m_timeAtMouse, vStart, vEnd, m_nsPerPixel, threadData->timeline, 0, stack);
+                                if ( !stack.empty() )
+                                {
+                                    ImGui::Separator();
+                                    TextDisabledUnformatted( "Time: [" );
+                                    ImGui::SameLine();
+                                    ImGui::Text( "%s", TimeToStringExact( vStart ) );
+                                    ImGui::SameLine();
+                                    TextDisabledUnformatted( "," );
+                                    ImGui::SameLine();
+                                    ImGui::Text( "%s", TimeToStringExact( vEnd ) );
+                                    ImGui::SameLine();
+                                    TextDisabledUnformatted( "]" );
+
+                                    TextFocused( "Stack depth:", RealToString( stack.size() ) );
+                                    for ( int index = 0; index < (int)stack.size(); index++ )
+                                    {
+                                        const ThreadStackInfo &info = stack[ index ];
+                                        if ( !info.merged )
+                                        {
+                                            const char* name = m_worker.GetZoneName( info.ev );
+                                            ImGui::Text( "[%d]: %s", index, name );
+                                        }
+                                        else
+                                        {
+                                            ImGui::Text( "[%d]: * multiple zones: %d", index, info.count );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         ImGui::EndTooltip();
                         ImGui::PushFont( m_smallFont );
 
@@ -361,17 +509,9 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
             }
         }
 
-        char buf[64];
-        if( tt )
-        {
-            sprintf( buf, "[%i:%i] CPU %i", tt->package, tt->core, i );
-        }
-        else
-        {
-            sprintf( buf, "CPU %i", i );
-        }
-        const auto txtx = ImGui::CalcTextSize( buf ).x;
-        DrawTextSuperContrast( draw, wpos + ImVec2( ty, offset-1 ), 0xFFDD88DD, buf );
+        const std::string cpuName = m_worker.GetFormattedCpuName( i );
+        const auto txtx = ImGui::CalcTextSize( cpuName.c_str() ).x;
+        DrawTextSuperContrast( draw, wpos + ImVec2( ty, offset-1 ), 0xFFDD88DD, cpuName.c_str() );
         if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( 0, offset-1 ), wpos + ImVec2( sty + txtx, offset + sty ) ) )
         {
             ImGui::PopFont();

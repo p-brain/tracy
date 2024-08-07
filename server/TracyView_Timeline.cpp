@@ -4,6 +4,7 @@
 #include "TracyMouse.hpp"
 #include "TracyPrint.hpp"
 #include "TracySourceView.hpp"
+#include "TracyTimelineItemCore.hpp"
 #include "TracyTimelineItemCpuData.hpp"
 #include "TracyTimelineItemGpu.hpp"
 #include "TracyTimelineItemPlot.hpp"
@@ -13,9 +14,6 @@
 
 namespace tracy
 {
-
-extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-extern bool g_bReApplyThreadOrder;
 
 
 extern double s_time;
@@ -40,7 +38,7 @@ void View::HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w )
     {
         if( ImGui::GetIO().KeyCtrl && m_highlight.start != m_highlight.end )
         {
-            m_setRangePopup = RangeSlim { m_highlight.start, m_highlight.end, true };
+            m_setRangePopup = RangeSlim { m_highlight.start, m_highlight.end, true, nullptr };
         }
         m_highlight.active = false;
     }
@@ -242,6 +240,8 @@ void View::HandleTimelineKeyboard( int64_t timespan, const ImVec2& wpos, float w
 
 void View::DrawTimeline()
 {
+    SyncViewSettings( m_vd, m_worker );
+
     m_msgHighlight.Decay( nullptr );
     m_zoneSrcLocHighlight.Decay( 0 );
     m_lockHoverHighlight.Decay( InvalidId );
@@ -273,6 +273,17 @@ void View::DrawTimeline()
     const auto w = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize;
     const auto timespan = m_vd.zvEnd - m_vd.zvStart;
     auto pxns = w / double( timespan );
+
+    m_timeAtMouse = -1;
+    m_nsPerPixel = 0;
+    if ( ImGui::IsMousePosValid() && ( pxns > 0 ) )
+    {
+        const float mpx = ImGui::GetMousePos().x;
+        const float screenx = ImGui::GetCursorScreenPos().x;
+        const double nsPerPixel = 1.0 / pxns;
+        m_timeAtMouse = (int64_t)( m_vd.zvStart + ( mpx - screenx ) * nsPerPixel );
+        m_nsPerPixel = nsPerPixel;
+    }
 
     const auto winpos = ImGui::GetWindowPos();
     const auto winsize = ImGui::GetWindowSize();
@@ -369,68 +380,89 @@ void View::DrawTimeline()
 
     if ( m_vd.drawPlots == ViewData::EPlotViz::Top )
     {
-        TimelineItemPlot *pZoneItem = nullptr;
         for ( const auto &v : m_worker.GetPlots() )
         {
-            if ( pZoneItem && v->type == PlotType::AdditionalZone )
+            m_tc.AddItem<TimelineItemPlot>( v );
+
+            if ( ((v->type == PlotType::User) || (v->type == PlotType::SysTime)) && m_vd.plotsChanged )
             {
-                pZoneItem->AddPlot( v );
-            }
-            else if ( v->type == PlotType::Zone  )
-            {
-                m_tc.AddItem<TimelineItemPlot>( v );
-                pZoneItem = ( TimelineItemPlot * ) &m_tc.GetItem( v );
-            }
-            else
-            {
-                m_tc.AddItem<TimelineItemPlot>( v );
+                const char* pname =   (v->type == PlotType::SysTime)
+                                    ? "__SysTime_CPU_usage__"
+                                    : ( v->name.active ? m_worker.GetString( v->name ) : nullptr );
+                if ( pname && (strcmp( pname, "???" ) != 0) )
+                {
+                    const std::string name( pname );
+                    ViewData::Plot plotSetting = { 0 };
+                    auto it = m_vd.plots.find( name );
+                    if ( it != m_vd.plots.end() )
+                    {
+                        plotSetting.visible = it->second.visible;
+                    }
+
+                    TimelineItem& ti = m_tc.GetItem( v );
+                    ti.SetVisible( plotSetting.visible );
+                }
             }
         }
+
+        m_vd.plotsChanged = false;
     }
 
     if( m_vd.drawZones )
     {
-    
-    const auto& threadData = m_worker.GetThreadData();
-    if(g_bReApplyThreadOrder || ( threadData.size() != m_threadOrder.size() ) )
-    {
-        if (( threadData.size() != m_threadOrder.size() ))
+        const auto& threadData = m_worker.GetThreadData();
+        if(m_vd.threadsChanged || ( threadData.size() != m_threadOrder.size() ) )
         {
-            m_threadOrder.reserve( threadData.size() );
-        	for( size_t i=m_threadOrder.size(); i<threadData.size(); i++ )
+            m_vd.threadsChanged = false;
+            if ( threadData.size() != m_threadOrder.size() )
             {
-            	m_threadOrder.push_back( threadData[i] );
+                m_threadOrder.reserve( threadData.size() );
+                for( size_t i=m_threadOrder.size(); i<threadData.size(); i++ )
+                {
+                    m_threadOrder.push_back( threadData[i] );
+                }
+            }
+
+            for (int i = 0; i < threadData.size(); i++)
+            {
+                auto it = m_vd.threads.find( threadData[ i ]->id );
+                if ( it == m_vd.threads.end() )
+                {
+                    threadData[ i ]->nSort = 0x100000 - i;
+                }
+                else
+                {
+                    threadData[ i ]->nSort = it->second.priority;
+                }
+            }
+
+            std::sort( m_threadOrder.begin(), m_threadOrder.end(),
+                       [] ( const ThreadData *a, const ThreadData *b )
+                       {
+                           return a->nSort < b->nSort;
+                       } );
+        }
+
+        if( m_showCoreView && m_worker.HasContextSwitches() )
+        {
+            const CpuData *cpuData = m_worker.GetCpuData();
+            const int cpuDataCount = m_worker.GetCpuDataCpuCount();
+            for( int i = 0; i < cpuDataCount; i++ )
+            {
+                const CpuData *pPerCpuData = &cpuData[ i ];
+                m_tc.AddItem<TimelineItemCore>( pPerCpuData );
             }
         }
-
-        for (int i = 0; i < threadData.size(); i++)
-        {         
-            auto it = g_MapThreadNameToPriority.find( m_worker.GetThreadName( threadData[ i ]->id ) );
-
-            if (it == g_MapThreadNameToPriority.end())
-            {
-                threadData[ i ]->nSort = 0x100000 - i;
-            }
-            else
-            {
-                threadData[ i ]->nSort = it->second;
-            }        
-        }
-
-        std::sort( m_threadOrder.begin(), m_threadOrder.end(),
-                   [] ( const ThreadData *a, const ThreadData *b )
-                   {
-                       return a->nSort < b->nSort;
-                   } );
-
-
-        // Copy new threadorder data out to data that's saved
-
-
-        }
-        for( const auto& v : m_threadOrder )
+        else
         {
-            m_tc.AddItem<TimelineItemThread>( v );
+            for( const auto& v : m_threadOrder )
+            {
+                m_tc.AddItem<TimelineItemThread>( v );
+
+                const bool visible = m_vd.threads[ v->id ].visible;
+                TimelineItem& ti = m_tc.GetItem( v );
+                ti.SetVisible( visible );
+            }
         }
     }
 
@@ -439,19 +471,7 @@ void View::DrawTimeline()
         TimelineItemPlot *pZoneItem = nullptr;
         for ( const auto &v : m_worker.GetPlots() )
         {
-            if ( pZoneItem && v->type == PlotType::AdditionalZone )
-            {
-                pZoneItem->AddPlot( v );
-            }
-            else if ( v->type == PlotType::Zone )
-            {
-                m_tc.AddItem<TimelineItemPlot>( v );
-                pZoneItem = ( TimelineItemPlot * ) &m_tc.GetItem( v );
-            }
-            else
-            {
-                m_tc.AddItem<TimelineItemPlot>( v );
-            }
+            m_tc.AddItem<TimelineItemPlot>( v );
         }
     }
 
@@ -471,7 +491,7 @@ void View::DrawTimeline()
             draw->AddRectFilled( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns, 0 ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns, lineh ), c0 );
             DrawLine( draw, linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + 0.5f, 0.5f ), linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + 0.5f, lineh + 0.5f ), ann->range.hiMin ? c2 : c1, ann->range.hiMin ? 2 : 1 );
             DrawLine( draw, linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns + 0.5f, 0.5f ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns + 0.5f, lineh + 0.5f ), ann->range.hiMax ? c2 : c1, ann->range.hiMax ? 2 : 1 );
-            if( drawMouseLine && ImGui::IsMouseHoveringRect( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns, 0 ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns, lineh ) ) )
+            if( hover && ImGui::IsMouseHoveringRect( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns, 0 ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns, lineh ) ) )
             {
                 ImGui::BeginTooltip();
                 if( ann->text.empty() )
@@ -591,6 +611,21 @@ void View::DrawTimeline()
     {
         auto& io = ImGui::GetIO();
         DrawLine( draw, ImVec2( io.MousePos.x + 0.5f, linepos.y + 0.5f ), ImVec2( io.MousePos.x + 0.5f, linepos.y + lineh + 0.5f ), 0x33FFFFFF );
+
+        if ( m_vd.drawMousePosTime && ( m_timeAtMouse >= 0 ) )
+        {
+            const float winX = ImGui::GetWindowSize().x;
+            const char *timeStr = TimeToStringExact( m_timeAtMouse );
+
+            const ImVec2 timeSize = ImGui::CalcTextSize( timeStr );
+            float posX = io.MousePos.x + 0.5f;
+            const float diffX = ( posX + timeSize.x ) - winX;
+            if ( diffX > 0 )
+            {
+                posX -= diffX;
+            }
+            draw->AddText( ImVec2( posX, linepos.y + 0.5f ), IM_COL32_WHITE, timeStr );
+        }
     }
 
     if( m_highlightZoom.active && m_highlightZoom.start != m_highlightZoom.end )

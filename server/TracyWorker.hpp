@@ -149,6 +149,7 @@ public:
     {
         uint32_t package;
         uint32_t core;
+        CpuType type;
     };
 
     struct MemoryBlock
@@ -349,6 +350,7 @@ private:
         bool symbolSamplesReady = false;
 #endif
 
+        unordered_flat_map<uint32_t, LockMap*> activeLockMap;
         unordered_flat_map<uint32_t, LockMap*> lockMap;
 
         ThreadCompress localThreadCompress;
@@ -405,6 +407,10 @@ private:
         bool hasBranchRetirement = false;
 
         unordered_flat_map<uint64_t, uint64_t> fiberToThreadMap;
+        unordered_flat_map<uint64_t, uint8_t> lockThreadIdToIndex;
+        unordered_flat_map<uint8_t, uint64_t> lockThreadIndexToId;
+        unordered_flat_map<uint64_t, unordered_flat_set<uint32_t>> threadToLockIdMap;
+        unordered_flat_map<uint64_t, unordered_flat_set<uint32_t>> threadToSingleLockIdMap;
     };
 
     struct MbpsBlock
@@ -453,7 +459,7 @@ public:
         NUM_FAILURES
     };
 
-    Worker( const char* addr, uint16_t port );
+    Worker( const char* addr, uint16_t port, bool keepSingleThreadLocks );
     Worker( const char* name, const char* program, const std::vector<ImportEventTimeline>& timeline, const std::vector<ImportEventMessages>& messages, const std::vector<ImportEventPlots>& plots, const std::unordered_map<uint64_t, std::string>& threadNames );
     Worker( FileRead& f, EventType::Type eventMask = EventType::All, bool bgTasks = true, bool allowStringModification = false);
     ~Worker();
@@ -533,7 +539,12 @@ public:
     const FrameImage* GetFrameImage( const FrameData& fd, size_t idx ) const;
     std::pair<int, int> GetFrameRange( const FrameData& fd, int64_t from, int64_t to );
 
+    size_t GetTotalLockObjectCount() const { return m_totalLockObjCount;  }
+    const unordered_flat_map<uint32_t, LockMap*>& GetActiveLockMap() const { return m_data.activeLockMap; }
     const unordered_flat_map<uint32_t, LockMap*>& GetLockMap() const { return m_data.lockMap; }
+    const unordered_flat_set<uint32_t>& GetLockIdsForThread( uint64_t tid ) const;
+    const unordered_flat_set<uint32_t>& GetTerminatedSingleThreadLockIdsForThread( uint64_t tid ) const;
+
     const Vector<short_ptr<MessageData>>& GetMessages() const { return m_data.messages; }
     const Vector<GpuCtxData*>& GetGpuData() const { return m_data.gpuData; }
     const Vector<PlotData*>& GetPlots() const { return m_data.plots.Data(); }
@@ -578,6 +589,8 @@ public:
     static tracy_force_inline int64_t GetZoneEndDirect( const ZoneEvent& ev ) { return ev.IsEndValid() ? ev.End() : ev.Start(); }
     static tracy_force_inline int64_t GetZoneEndDirect( const GpuEvent& ev ) { return ev.GpuEnd() >= 0 ? ev.GpuEnd() : ev.GpuStart(); }
 
+    std::string GetFormattedCpuName( uint32_t cpuThread ) const;
+
     uint32_t FindStringIdx( const char* str ) const;
     const char* GetString( uint64_t ptr ) const;
     const char* GetString( const StringRef& ref ) const;
@@ -608,7 +621,9 @@ public:
     const unordered_flat_map<uint64_t, SymbolData>& GetSymbolMap() const { return m_data.symbolMap; }
 
 #ifndef TRACY_NO_STATISTICS
-    void CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc, bool bAggregatePerFrame, bool bZoneName, bool bAddToExistingPlot );
+	const char *PlotHelper_GetStringForFilterType( PlotFilterType filterType ) const;
+	const char *PlotHelper_GetStringForFilterId( int16_t srcloc, PlotFilterType filterType, uint64_t filterId ) const;
+    PlotData *CreatePlotForSourceLocation( int16_t srcloc, PlotFilterType filterType, uint64_t filterId, bool bAggregatePerFrame, PlotDrawType drawType, PlotData *pAddToExistingPlot );
     SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc );
     const SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc ) const;
     const unordered_flat_map<int16_t, SourceLocationZones>& GetSourceLocationZones() const { return m_data.sourceLocationZones; }
@@ -630,6 +645,7 @@ public:
     tracy_force_inline uint16_t CompressThread( uint64_t thread ) { return m_data.localThreadCompress.CompressThread( thread ); }
     tracy_force_inline uint64_t DecompressThread( uint16_t thread ) const { return m_data.localThreadCompress.DecompressThread( thread ); }
     tracy_force_inline uint64_t DecompressThreadExternal( uint16_t thread ) const { return m_data.externalThreadCompress.DecompressThread( thread ); }
+    tracy_force_inline size_t GetExternalCompressedThreadCount() const { return m_data.externalThreadCompress.GetCompressedThreadCount(); }
 
     std::shared_mutex& GetMbpsDataLock() { return m_mbpsData.lock; }
     const std::vector<float>& GetMbpsData() const { return m_mbpsData.mbps; }
@@ -691,6 +707,7 @@ private:
 
     tracy_force_inline bool DispatchProcess( const QueueItem& ev, const char*& ptr );
     tracy_force_inline bool Process( const QueueItem& ev );
+    tracy_force_inline void ProcessSyncValidation( const QueueSyncValidation &ev );
     tracy_force_inline void ProcessThreadContext( const QueueThreadContext& ev );
     tracy_force_inline void ProcessZoneBegin( const QueueZoneBegin& ev );
     tracy_force_inline void ProcessZoneBeginCallstack( const QueueZoneBegin& ev );
@@ -707,6 +724,8 @@ private:
     tracy_force_inline void ProcessZoneName();
     tracy_force_inline void ProcessZoneColor( const QueueZoneColor& ev );
     tracy_force_inline void ProcessZoneValue( const QueueZoneValue& ev );
+    tracy_force_inline void ProcessGlobalLockSyncBegin( const QueueGlobalLockSyncBegin& ev );
+    tracy_force_inline void ProcessGlobalLockSyncEnd( const QueueGlobalLockSyncEnd& ev );
     tracy_force_inline void ProcessLockAnnounce( const QueueLockAnnounce& ev );
     tracy_force_inline void ProcessLockTerminate( const QueueLockTerminate& ev );
     tracy_force_inline void ProcessLockWait( const QueueLockWait& ev );
@@ -716,6 +735,7 @@ private:
     tracy_force_inline void ProcessLockSharedObtain( const QueueLockObtain& ev );
     tracy_force_inline void ProcessLockSharedRelease( const QueueLockReleaseShared& ev );
     tracy_force_inline void ProcessLockMark( const QueueLockMark& ev );
+    tracy_force_inline void ProcessLockMarkFileLine( const QueueLockMarkFileLine& ev );
     tracy_force_inline void ProcessLockName( const QueueLockName& ev );
     tracy_force_inline void ProcessPlotDataInt( const QueuePlotDataInt& ev );
     tracy_force_inline void ProcessPlotDataFloat( const QueuePlotDataFloat& ev );
@@ -867,7 +887,7 @@ private:
 
     tracy_force_inline void NewZone( ZoneEvent* zone );
 
-    void InsertLockEvent( LockMap& lockmap, LockEvent* lev, uint64_t thread, int64_t time );
+    void InsertLockEvent( LockMap& lockmap, LockEvent* lev, uint64_t thread, uint32_t lockid, int64_t time );
 
     bool CheckString( uint64_t ptr );
     void CheckThreadString( uint64_t id );
@@ -971,6 +991,7 @@ private:
     Socket m_sock;
     std::string m_addr;
     uint16_t m_port;
+    bool m_keepSingleThreadLocks = false;
 
     std::thread m_thread;
     std::thread m_threadNet;
@@ -1038,6 +1059,28 @@ private:
     uint64_t m_memNamePayload = 0;
 
     Slab<64*1024*1024> m_slab;
+
+    size_t m_totalLockObjCount = 0;
+
+    struct LockMapFreeNode
+    {
+        LockMapFreeNode *next;
+        uint32_t lockId;
+    };
+
+    LockMapFreeNode* m_lockMapFreeList = nullptr;
+    LockMap* AllocLockMap( uint32_t lockid );
+    void FreeLockMap( LockMap* lm, uint32_t lockid );
+
+    struct LockEventFreeNode
+    {
+        LockEventFreeNode *next;
+    };
+
+    LockEvent* AllocLockEvent( LockType type );
+    void FreeLockEvent( LockEvent* ev );
+    LockEventFreeNode* m_lockEvFreeList = nullptr;
+    LockEventFreeNode* m_sharedLockEvFreeList = nullptr;;
 
     DataBlock m_data;
     MbpsBlock m_mbpsData;

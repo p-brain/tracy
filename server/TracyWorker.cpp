@@ -71,13 +71,12 @@ static void UpdateLockCountLockable( LockMap& lockmap, size_t pos )
     bool isContended = lockmap.isContended;
     uint8_t lockingThread;
     uint8_t lockCount;
-    uint64_t waitList;
+    ThreadWaitList waitList;
 
     if( pos == 0 )
     {
         lockingThread = 0;
         lockCount = 0;
-        waitList = 0;
     }
     else
     {
@@ -91,16 +90,17 @@ static void UpdateLockCountLockable( LockMap& lockmap, size_t pos )
     while( pos != end )
     {
         auto& tl = timeline[pos];
-        const auto tbit = uint64_t( 1 ) << tl.ptr->thread;
+        const LockEvent *lev = tl.ptr.get();
+        const size_t tbit = tl.ptr->thread;
         switch( (LockEvent::Type)tl.ptr->type )
         {
         case LockEvent::Type::Wait:
-            waitList |= tbit;
+            waitList.Set(tbit);
             break;
         case LockEvent::Type::Obtain:
             assert( lockCount < std::numeric_limits<uint8_t>::max() );
-            assert( ( waitList & tbit ) != 0 );
-            waitList &= ~tbit;
+            assert( waitList.Test(tbit) );
+            waitList.Reset(tbit);
             lockingThread = tl.ptr->thread;
             lockCount++;
             break;
@@ -114,7 +114,23 @@ static void UpdateLockCountLockable( LockMap& lockmap, size_t pos )
         tl.lockingThread = lockingThread;
         tl.waitList = waitList;
         tl.lockCount = lockCount;
-        if( !isContended ) isContended = lockCount != 0 && waitList != 0;
+        if ( !isContended )
+        {
+            const size_t waitCount = waitList.Count();
+
+            const bool isLocked = ( lockCount != 0 );
+            bool otherThreadWaiting = false;
+            if ( waitCount > 1 )
+            {
+                otherThreadWaiting = true;
+            }
+            else if ( waitCount == 1 )
+            {
+                otherThreadWaiting = !waitList.Test( tl.lockingThread );
+            }
+
+            isContended = ( lockCount != 0 ) && otherThreadWaiting;
+        }
         pos++;
     }
 
@@ -127,17 +143,14 @@ static void UpdateLockCountSharedLockable( LockMap& lockmap, size_t pos )
     bool isContended = lockmap.isContended;
     uint8_t lockingThread;
     uint8_t lockCount;
-    uint64_t waitShared;
-    uint64_t waitList;
-    uint64_t sharedList;
+    ThreadWaitList waitShared;
+    ThreadWaitList waitList;
+    ThreadWaitList sharedList;
 
     if( pos == 0 )
     {
         lockingThread = 0;
         lockCount = 0;
-        waitShared = 0;
-        waitList = 0;
-        sharedList = 0;
     }
     else
     {
@@ -157,19 +170,19 @@ static void UpdateLockCountSharedLockable( LockMap& lockmap, size_t pos )
     {
         auto& tl = timeline[pos];
         const auto tlp = (LockEventShared*)(LockEvent*)tl.ptr;
-        const auto tbit = uint64_t( 1 ) << tlp->thread;
+        const size_t tbit = tlp->thread;
         switch( (LockEvent::Type)tlp->type )
         {
         case LockEvent::Type::Wait:
-            waitList |= tbit;
+            waitList.Set( tbit );
             break;
         case LockEvent::Type::WaitShared:
-            waitShared |= tbit;
+            waitShared.Set( tbit );
             break;
         case LockEvent::Type::Obtain:
             assert( lockCount < std::numeric_limits<uint8_t>::max() );
-            assert( ( waitList & tbit ) != 0 );
-            waitList &= ~tbit;
+            assert( waitList.Test( tbit ) );
+            waitList.Reset( tbit );
             lockingThread = tlp->thread;
             lockCount++;
             break;
@@ -178,14 +191,14 @@ static void UpdateLockCountSharedLockable( LockMap& lockmap, size_t pos )
             lockCount--;
             break;
         case LockEvent::Type::ObtainShared:
-            assert( ( waitShared & tbit ) != 0 );
-            assert( ( sharedList & tbit ) == 0 );
-            waitShared &= ~tbit;
-            sharedList |= tbit;
+            assert( waitShared.Test( tbit ) );
+            assert( !sharedList.Test( tbit ) == 0 );
+            waitShared.Reset( tbit );
+            sharedList.Set( tbit );
             break;
         case LockEvent::Type::ReleaseShared:
-            assert( ( sharedList & tbit ) != 0 );
-            sharedList &= ~tbit;
+            assert( sharedList.Test( tbit ) );
+            sharedList.Reset( tbit );
             break;
         default:
             break;
@@ -195,7 +208,7 @@ static void UpdateLockCountSharedLockable( LockMap& lockmap, size_t pos )
         tl.waitList = waitList;
         tlp->sharedList = sharedList;
         tl.lockCount = lockCount;
-        if( !isContended ) isContended = ( lockCount != 0 && ( waitList != 0 || waitShared != 0 ) ) || ( sharedList != 0 && waitList != 0 );
+        if( !isContended ) isContended = ( lockCount != 0 && ( waitList.Any() || waitShared.Any() ) ) || ( sharedList.Any() && waitList.Any() );
         pos++;
     }
 
@@ -212,6 +225,8 @@ static inline void UpdateLockCount( LockMap& lockmap, size_t pos )
     {
         UpdateLockCountSharedLockable( lockmap, pos );
     }
+
+    lockmap.isMultiThread = ( lockmap.threadList.size() > 1 );
 }
 
 static tracy_force_inline void WriteTimeOffset( FileWrite& f, int64_t& refTime, int64_t time )
@@ -261,9 +276,10 @@ static bool IsQueryPrio( ServerQuery type )
 
 LoadProgress Worker::s_loadProgress;
 
-Worker::Worker( const char* addr, uint16_t port )
+Worker::Worker( const char* addr, uint16_t port, bool keepSingleThreadLocks )
     : m_addr( addr )
     , m_port( port )
+    , m_keepSingleThreadLocks(keepSingleThreadLocks)
     , m_hasData( false )
     , m_stream( LZ4_createStreamDecode() )
     , m_buffer( new char[TargetFrameSize*3 + 1] )
@@ -282,6 +298,7 @@ Worker::Worker( const char* addr, uint16_t port )
     , m_loadTime( 0 )
 {
     m_data.sourceLocationExpand.push_back( 0 );
+    m_data.sourceLocation.emplace( 0, SourceLocation{} );
     m_data.localThreadCompress.InitZero();
     m_data.callstackPayload.push_back( nullptr );
     m_data.zoneExtra.push_back( ZoneExtra {} );
@@ -321,6 +338,7 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
     , m_traceVersion( CurrentVersion )
 {
     m_data.sourceLocationExpand.push_back( 0 );
+    m_data.sourceLocation.emplace( 0, SourceLocation{} );
     m_data.localThreadCompress.InitZero();
     m_data.callstackPayload.push_back( nullptr );
     m_data.zoneExtra.push_back( ZoneExtra {} );
@@ -475,10 +493,10 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
         }
 
         auto plot = m_slab.AllocInit<PlotData>();
-        plot->name = nptr;
+        plot->name = StringRef( StringRef::Type::Ptr, nptr );
         plot->type = PlotType::User;
         plot->format = v.format;
-        plot->showSteps = false;
+        plot->drawType = PlotDrawType::Line;
         plot->fill = true;
         plot->color = 0;
 
@@ -656,7 +674,18 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
                 f.Read( thread );
                 core.second.emplace_back( thread );
 
-                m_data.cpuTopologyMap.emplace( thread, CpuThreadTopology { packageId, coreId } );
+                CpuType cpuType = CpuType::Normal;
+                if( fileVer >= FileVersion( 0, 10, 1 ) )
+                {
+                    uint32_t type = 0;
+                    f.Read( type );
+                    if ( type >= (uint32_t)CpuType::Normal && ( type < (uint32_t)CpuType::Count ) )
+                    {
+                        cpuType = (CpuType)type;
+                    }
+                }
+
+                m_data.cpuTopologyMap.emplace( thread, CpuThreadTopology{ packageId, coreId, cpuType } );
             }
         }
     }
@@ -796,6 +825,11 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
         m_data.sourceLocation.emplace( ptr, srcloc );
     }
 
+    if ( !m_data.sourceLocation.contains( 0 ) )
+    {
+        m_data.sourceLocation.emplace( 0, SourceLocation{} );
+    }
+
     f.Read( sz );
     m_data.sourceLocationExpand.reserve_exact( sz, m_slab );
     f.Read( m_data.sourceLocationExpand.data(), sizeof( uint64_t ) * sz );
@@ -868,6 +902,8 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
     if( eventMask & EventType::Locks )
     {
         s_loadProgress.subTotal.store( sz, std::memory_order_relaxed );
+        m_data.lockMap.reserve( sz );
+
         for( uint64_t i=0; i<sz; i++ )
         {
             s_loadProgress.subProgress.store( i, std::memory_order_relaxed );
@@ -876,6 +912,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
             uint32_t id;
             uint64_t tsz;
             f.Read8( id, lockmap.customName, lockmap.srcloc, lockmap.type, lockmap.valid, lockmap.timeAnnounce, lockmap.timeTerminate, tsz );
+            lockmap.isTerminated = ( lockmap.timeTerminate >= lockmap.timeAnnounce );
             lockmap.isContended = false;
             lockmap.threadMap.reserve( tsz );
             lockmap.threadList.reserve( tsz );
@@ -885,6 +922,14 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
                 f.Read( t );
                 lockmap.threadMap.emplace( t, i );
                 lockmap.threadList.emplace_back( t );
+                if ( (tsz == 1) && lockmap.isTerminated )
+                {
+                    m_data.threadToSingleLockIdMap[ t ].emplace( id );
+                }
+                else
+                {
+                    m_data.threadToLockIdMap[ t ].emplace( id );
+                }
             }
             f.Read( tsz );
             lockmap.timeline.reserve_exact( tsz, m_slab );
@@ -1101,35 +1146,37 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
     {
         m_data.plots.Data().reserve( sz );
         s_loadProgress.subTotal.store( sz, std::memory_order_relaxed );
-            for( uint64_t i=0; i<sz; i++ )
-            {
-                s_loadProgress.subProgress.store( i, std::memory_order_relaxed );
-                auto pd = m_slab.AllocInit<PlotData>();
-                uint64_t psz;
-                f.Read10( pd->type, pd->format, pd->showSteps, pd->fill, pd->color, pd->name, pd->min, pd->max, pd->sum, psz );
-                pd->data.reserve_exact( psz, m_slab );
-                auto ptr = pd->data.data();
-                int64_t refTime = 0;
-                for( uint64_t j=0; j<psz; j++ )
-                {
-                    int64_t t;
-                    f.Read2( t, ptr->val );
-                    refTime += t;
-                    ptr->time = refTime;
-                    ptr++;
-                }
-                m_data.plots.Data().push_back_no_space_check( pd );
-            }
-        }
-        else
+        for( uint64_t i=0; i<sz; i++ )
         {
-            for( uint64_t i=0; i<sz; i++ )
+            s_loadProgress.subProgress.store( i, std::memory_order_relaxed );
+            auto pd = m_slab.AllocInit<PlotData>();
+            uint64_t psz;
+            uint64_t name;
+            f.Read10( pd->type, pd->format, pd->drawType, pd->fill, pd->color, name, pd->min, pd->max, pd->sum, psz );
+            pd->name = StringRef( StringRef::Ptr, name );
+            pd->data.reserve_exact( psz, m_slab );
+            auto ptr = pd->data.data();
+            int64_t refTime = 0;
+            for( uint64_t j=0; j<psz; j++ )
             {
-                f.Skip( sizeof( PlotData::name ) + sizeof( PlotData::min ) + sizeof( PlotData::max ) + sizeof( PlotData::sum ) + sizeof( PlotData::type ) + sizeof( PlotData::format ) + sizeof( PlotData::showSteps ) + sizeof( PlotData::fill ) + sizeof( PlotData::color ) );
-                uint64_t psz;
-                f.Read( psz );
-                f.Skip( psz * ( sizeof( uint64_t ) + sizeof( double ) ) );
+                int64_t t;
+                f.Read2( t, ptr->val );
+                refTime += t;
+                ptr->time = refTime;
+                ptr++;
             }
+            m_data.plots.Data().push_back_no_space_check( pd );
+        }
+    }
+    else
+    {
+        for( uint64_t i=0; i<sz; i++ )
+        {
+            f.Skip( sizeof( PlotData::name.str ) + sizeof( PlotData::min ) + sizeof( PlotData::max ) + sizeof( PlotData::sum ) + sizeof( PlotData::type ) + sizeof( PlotData::format ) + sizeof( PlotData::drawType ) + sizeof( PlotData::fill ) + sizeof( PlotData::color ) );
+            uint64_t psz;
+            f.Read( psz );
+            f.Skip( psz * ( sizeof( uint64_t ) + sizeof( double ) ) );
+        }
     }
 
     s_loadProgress.subTotal.store( 0, std::memory_order_relaxed );
@@ -1908,6 +1955,18 @@ Worker::~Worker()
     {
         v->~FrameData();
     }
+    while ( m_lockMapFreeList )
+    {
+        assert( !m_data.lockMap.contains(m_lockMapFreeList->lockId) );
+        m_data.lockMap.erase( m_lockMapFreeList->lockId );
+        m_lockMapFreeList = m_lockMapFreeList->next;
+    }
+    for ( auto &v : m_data.activeLockMap )
+    {
+        m_data.lockMap.erase( v.first );
+        v.second->~LockMap();
+    }
+
     for( auto& v : m_data.lockMap )
     {
         v.second->~LockMap();
@@ -2324,6 +2383,34 @@ int64_t Worker::GetZoneEndImpl( const GpuEvent& ev )
     }
 }
 
+std::string Worker::GetFormattedCpuName( uint32_t cpuThread ) const
+{
+    const CpuThreadTopology *tt = GetThreadTopology( cpuThread );
+    char buf[ 64 ];
+    int len = 0;
+    if ( tt )
+    {
+        if ( tt->type == CpuType::IntelPCore )
+        {
+            len = snprintf( buf, sizeof(buf), "[%i:%i] P-Core: CPU %i", tt->package, tt->core, cpuThread );
+        }
+        else if ( tt->type == CpuType::IntelECore )
+        {
+            len = snprintf( buf, sizeof(buf), "[%i:%i] E-Core: CPU %i", tt->package, tt->core, cpuThread );
+        }
+        else
+        {
+            len = snprintf( buf, sizeof(buf), "[%i:%i] CPU %i", tt->package, tt->core, cpuThread );
+        }
+    }
+    else
+    {
+        len = snprintf( buf, sizeof(buf), "CPU %i", cpuThread );
+    }
+
+    return std::string( buf, std::min( (size_t)len, sizeof( buf ) - 1 ) );
+}
+
 uint32_t Worker::FindStringIdx( const char* str ) const
 {
     if( !str ) return 0;
@@ -2570,75 +2657,216 @@ std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool 
 }
 
 #ifndef TRACY_NO_STATISTICS
-void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc, bool bAggregatePerFrame, bool bZoneName, bool bAddToExistingPlot )
+// TODO: Copy of View::GetZoneParent(TracyView_Utility.cpp) - consider moving code to a common place
+static const ZoneEvent *PlotHelper_GetZoneParent( const Worker &worker, const ZoneEvent &zone, uint64_t tid )
+{
+	const auto thread = worker.GetThreadData( tid );
+	const ZoneEvent *parent = nullptr;
+	const Vector<short_ptr<ZoneEvent>> *timeline = &thread->timeline;
+	if ( timeline->empty() ) return nullptr;
+	for ( ;;)
+	{
+		if ( timeline->is_magic() )
+		{
+			auto vec = ( Vector<ZoneEvent>* )timeline;
+			auto it = std::upper_bound( vec->begin(), vec->end(), zone.Start(), [] ( const auto &l, const auto &r ) { return l < r.Start(); } );
+			if ( it != vec->begin() ) --it;
+			if ( zone.IsEndValid() && it->Start() > zone.End() ) break;
+			if ( it == &zone ) return parent;
+			if ( !it->HasChildren() ) break;
+			parent = it;
+			timeline = &worker.GetZoneChildren( parent->Child() );
+		}
+		else
+		{
+			auto it = std::upper_bound( timeline->begin(), timeline->end(), zone.Start(), [] ( const auto &l, const auto &r ) { return l < r->Start(); } );
+			if ( it != timeline->begin() ) --it;
+			if ( zone.IsEndValid() && ( *it )->Start() > zone.End() ) break;
+			if ( *it == &zone ) return parent;
+			if ( !( *it )->HasChildren() ) break;
+			parent = *it;
+			timeline = &worker.GetZoneChildren( parent->Child() );
+		}
+	}
+	return nullptr;
+}
+
+static uint64_t PlotHelper_GetFilterId( const Worker &worker, const Worker::ZoneThreadData &ev, PlotFilterType filterType )
+{
+	switch ( filterType )
+	{
+		case PlotFilterType::Thread:
+			return ev.Thread();
+		case PlotFilterType::UserText:
+		{
+			const auto &zone = *ev.Zone();
+			if ( !worker.HasZoneExtra( zone ) ) return std::numeric_limits<uint64_t>::max();
+			const auto &extra = worker.GetZoneExtra( zone );
+			return extra.text.Active() ? extra.text.Idx() : std::numeric_limits<uint64_t>::max();
+		}
+		case PlotFilterType::ZoneName:
+		{
+			const auto &zone = *ev.Zone();
+			if ( !worker.HasZoneExtra( zone ) ) return std::numeric_limits<uint64_t>::max();
+			const auto &extra = worker.GetZoneExtra( zone );
+			return extra.name.Active() ? extra.name.Idx() : std::numeric_limits<uint64_t>::max();
+		}
+		case PlotFilterType::Callstack:
+			return worker.GetZoneExtra( *ev.Zone() ).callstack.Val();
+		case PlotFilterType::Parent:
+		{
+			const auto parent = PlotHelper_GetZoneParent( worker, *ev.Zone(), worker.DecompressThread( ev.Thread() ) );
+			return parent ? uint64_t( parent->SrcLoc() ) : 0;
+		}
+		case PlotFilterType::NoFilter:
+			return 0;
+		default:
+			assert( false );
+			return 0;
+	}
+}
+
+const char *Worker::PlotHelper_GetStringForFilterType( PlotFilterType filterType ) const
+{
+	switch ( filterType )
+	{
+		case PlotFilterType::Thread:
+			return "thread";
+		case PlotFilterType::UserText:
+			return "user text";
+		case PlotFilterType::ZoneName:
+			return "zone name";
+		case PlotFilterType::Callstack:
+			return "callstack";
+		case PlotFilterType::Parent:
+			return "parent";
+		case PlotFilterType::NoFilter:
+			return "no filter";
+		default:
+			assert( false );
+			return "";
+	}
+}
+
+const char *Worker::PlotHelper_GetStringForFilterId( int16_t srcloc, PlotFilterType filterType, uint64_t filterId ) const
+{
+	const char *filterString = "";
+	switch ( filterType )
+	{
+		case PlotFilterType::Thread:
+		{
+			const auto tid = DecompressThread( filterId );
+			filterString = GetThreadName( tid );
+			break;
+		}
+		case PlotFilterType::UserText:
+			filterString = filterId == std::numeric_limits<uint64_t>::max() ? "No user text" : GetString( StringIdx( filterId ) );
+			break;
+		case PlotFilterType::ZoneName:
+			if ( filterId == std::numeric_limits<uint64_t>::max() )
+			{
+				filterString = GetZoneName( GetSourceLocation( srcloc ) );
+			}
+			else
+			{
+				filterString = GetString( StringIdx( filterId ) );
+			}
+			break;
+		case PlotFilterType::Callstack:
+			if ( filterId == 0 )
+			{
+				filterString = "<no callstack>";
+			}
+			else
+			{
+				auto &callstack = GetCallstack( filterId );
+				auto &frameData = *GetCallstackFrame( *callstack.begin() );
+				filterString = GetString( frameData.data[ frameData.size - 1 ].name );
+			}
+			break;
+		case PlotFilterType::Parent:
+			if ( filterId == 0 )
+			{
+				filterString = "<no parent>";
+			}
+			else
+			{
+				auto &srcloc = GetSourceLocation( int16_t( filterId ) );
+				filterString = GetString( srcloc.name.active ? srcloc.name : srcloc.function );
+			}
+			break;
+		case PlotFilterType::NoFilter:
+			return "<no filter>";
+		default:
+			assert( false );
+			return "";
+	}
+	return filterString;
+}
+
+PlotData* Worker::CreatePlotForSourceLocation( int16_t srcloc, PlotFilterType filterType, uint64_t filterId, bool bAggregatePerFrame, PlotDrawType drawType, PlotData * pAddToExistingPlot )
 {
     assert( AreSourceLocationZonesReady() );
     auto it = m_data.sourceLocationZones.find( srcloc );
     if ( it != m_data.sourceLocationZones.end() )
     {
-        SourceLocationZones &srcLoc = it->second;
-        SortedVector<ZoneThreadData, SourceLocationZones::ZtdSort> &zones = srcLoc.zones;
+        SourceLocationZones &srcLocZones = it->second;
+        SortedVector<ZoneThreadData, SourceLocationZones::ZtdSort> &zones = srcLocZones.zones;
         zones.ensure_sorted();
 
-        // Store plot name
-        const char *pFullPlotName = szPlotName;
-        if ( bAggregatePerFrame )
-        {
-            static char extendedPlotName[ 1024 ];
-            snprintf( extendedPlotName, 1024, "%s [PER-FRAME TOTAL]", szPlotName );
-            pFullPlotName = extendedPlotName;
-        }
+		static char extendedPlotName[ 1024 ];
+		if ( filterType == PlotFilterType::NoFilter )
+		{
+			snprintf( extendedPlotName, 1024, "%s%s",
+					  GetZoneName( GetSourceLocation( srcloc ) ),
+					  ( bAggregatePerFrame ? " [PER-FRAME TOTAL]" : "" ) );
+		}
+		else
+		{
+			snprintf( extendedPlotName, 1024, "%s [by %s: %s]%s",
+					  GetZoneName( GetSourceLocation( srcloc ) ),
+					  PlotHelper_GetStringForFilterType( filterType ),
+					  PlotHelper_GetStringForFilterId( srcloc, filterType, filterId ),
+					  ( bAggregatePerFrame ? " [PER-FRAME TOTAL]" : "" ) );
+		}
+		StringRef strPlotName = StringRef( StringRef::Type::Idx, StoreString( extendedPlotName, strlen( extendedPlotName ) ).idx );
 
-        const auto lenPlotName = strlen( pFullPlotName );
-        auto ptr = m_slab.Alloc<char>( lenPlotName + 1 );
-        memcpy( ptr, pFullPlotName, lenPlotName );
-        ptr[ lenPlotName ] = '\0';
-
-        uint64_t nPlotName = ( uint64_t )ptr;
-        auto it = m_data.strings.find( nPlotName );
-        assert( it == m_data.strings.end() );
-        if ( it == m_data.strings.end() )
-        {
-            m_data.strings.emplace( nPlotName, ptr );
-        }
-        
+       
         // Create plot
         PlotData *plot = m_slab.AllocInit<PlotData>();
         plot->data.reserve( zones.size() );
 
-        plot->name = nPlotName;
-        plot->type = bAddToExistingPlot ? PlotType::AdditionalZone : PlotType::Zone;
+        plot->name = strPlotName;
+        plot->type = PlotType::Zone;
         plot->format = PlotValueFormatting::Number;
-        plot->showSteps = bAggregatePerFrame ? 1 : 0;
+        plot->drawType = drawType;
         plot->fill = 1;
         plot->color = 0;
+        plot->zonePlotDef = m_slab.AllocInit<ZonePlotDef>();
+        plot->zonePlotDef->srcloc = srcloc;
+		plot->zonePlotDef->filterType = filterType;
+		plot->zonePlotDef->filterId = filterId;
+        plot->zonePlotDef->aggregatePerFrame = bAggregatePerFrame;
 
-        if ( !bAggregatePerFrame )
+		plot->min = 0.0;
+		plot->max = 0.0;
+		plot->sum = 0.0;		
+		if ( !bAggregatePerFrame )
         {
-            plot->min = srcLoc.min / ( 1000.0 * 1000.0 );
-            plot->max = srcLoc.max / ( 1000.0 * 1000.0 );
-            plot->sum = srcLoc.total / ( 1000.0 * 1000.0 );
             for ( const ZoneThreadData &zoneThreadData : zones )
             {
                 const ZoneEvent &zone = *zoneThreadData.Zone();
                 int64_t zoneDurationNs = GetZoneEndDirect( zone ) - zone.Start();
                 double zoneDurationMs = zoneDurationNs / ( 1000.0 * 1000.0 );
 
-                if ( !bZoneName || 
-                     ( HasZoneExtra( zone ) && 
-                       GetZoneExtra( zone ).name.Active() && 
-                       strcmp( GetString( GetZoneExtra( zone ).name ), szPlotName ) == 0 ) )
+                if ( filterId == PlotHelper_GetFilterId( *this, zoneThreadData, filterType ) )
                 {
-                    plot->data.push_back( { zone.Start(), zoneDurationMs } );
+					InsertPlot( plot, zone.Start(), zoneDurationMs );
                 }
             }
         }
         else
         {
-            plot->min = 0.0;
-            plot->max = 0.0;
-            plot->sum = 0.0;
-
             const FrameData *pFrameData = GetFramesBase();
             if ( pFrameData )
             {
@@ -2660,10 +2888,7 @@ void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc
                         zoneStartTime = zone.Start();
                         if ( ( zoneStartTime < frameEndTime ) )
                         {
-                            if ( !bZoneName ||
-                                 ( HasZoneExtra( zone ) &&
-                                   GetZoneExtra( zone ).name.Active() &&
-                                   strcmp( GetString( GetZoneExtra( zone ).name ), szPlotName ) == 0 ) )
+							if ( filterId == PlotHelper_GetFilterId( *this, zoneThreadData, filterType ) )
                             {
                                 int64_t zoneDurationNs = GetZoneEndDirect( zone ) - zone.Start();
                                 zoneTotalDurationPerFrameMs += ( zoneDurationNs / ( 1000.0 * 1000.0 ) );
@@ -2674,16 +2899,23 @@ void Worker::CreatePlotForSourceLocation( const char *szPlotName, int16_t srcloc
                         }
                     }
                     
-                    if ( plot->min > zoneTotalDurationPerFrameMs ) plot->min = zoneTotalDurationPerFrameMs;
-                    else if ( plot->max < zoneTotalDurationPerFrameMs ) plot->max = zoneTotalDurationPerFrameMs;
-                    plot->sum += zoneTotalDurationPerFrameMs;
-                    plot->data.push_back( { frameBeginTime, zoneTotalDurationPerFrameMs } );
+					InsertPlot( plot, frameBeginTime, zoneTotalDurationPerFrameMs );
                 }
             }
         }
 
-        m_data.plots.Data().push_back( plot );
+        if ( pAddToExistingPlot )
+        {
+            assert( pAddToExistingPlot->nextPlot == nullptr );
+            pAddToExistingPlot->nextPlot = plot;
+        }
+        else
+        {
+            m_data.plots.Data().push_back( plot );
+        }
+        return plot;
     }
+    return nullptr;
 }
 
 Worker::SourceLocationZones& Worker::GetZonesForSourceLocation( int16_t srcloc )
@@ -3566,6 +3798,28 @@ uint64_t* Worker::GetGpuSourceLocationZonesCntReal( uint16_t srcloc )
 }
 #endif
 
+const unordered_flat_set<uint32_t> &Worker::GetLockIdsForThread( uint64_t tid ) const
+{
+    static const unordered_flat_set<uint32_t> empty;
+    auto it = m_data.threadToLockIdMap.find( tid );
+    if ( it != m_data.threadToLockIdMap.end() )
+    {
+        return it->second;
+    }
+    return empty;
+}
+
+const unordered_flat_set<uint32_t> &Worker::GetTerminatedSingleThreadLockIdsForThread( uint64_t tid ) const
+{
+    static const unordered_flat_set<uint32_t> empty;
+    auto it = m_data.threadToSingleLockIdMap.find( tid );
+    if ( it != m_data.threadToSingleLockIdMap.end() )
+    {
+        return it->second;
+    }
+    return empty;
+}
+
 const ThreadData* Worker::GetThreadData( uint64_t tid ) const
 {
     auto it = m_threadMap.find( tid );
@@ -3595,6 +3849,7 @@ ThreadData* Worker::NewThread( uint64_t thread, bool fiber )
     td->fiber = nullptr;
     td->stackCount = (uint8_t*)m_slab.AllocBig( sizeof( uint8_t ) * 64*1024 );
     memset( td->stackCount, 0, sizeof( uint8_t ) * 64*1024 );
+    td->maxDepth = 0;
     m_data.threads.push_back( td );
     m_threadMap.emplace( thread, td );
     m_data.threadDataLast.first = thread;
@@ -3651,7 +3906,7 @@ void Worker::NewZone( ZoneEvent* zone )
 #endif
 }
 
-void Worker::InsertLockEvent( LockMap& lockmap, LockEvent* lev, uint64_t thread, int64_t time )
+void Worker::InsertLockEvent( LockMap& lockmap, LockEvent* lev, uint64_t thread, uint32_t lockid, int64_t time )
 {
     if( m_data.lastTime < time ) m_data.lastTime = time;
 
@@ -3666,6 +3921,8 @@ void Worker::InsertLockEvent( LockMap& lockmap, LockEvent* lev, uint64_t thread,
     }
     lev->thread = it->second;
     assert( lev->thread == it->second );
+    m_data.threadToLockIdMap[ thread ].emplace( lockid );
+
     auto& timeline = lockmap.timeline;
     if( timeline.empty() )
     {
@@ -3840,14 +4097,24 @@ void Worker::AddString( uint64_t ptr, const char* str, size_t sz )
     }
 }
 
-void Worker::AddThreadString( uint64_t id, const char* str, size_t sz )
+void Worker::AddThreadString( uint64_t id, const char *str, size_t sz )
 {
-    assert( m_pendingThreads > 0 );
-    m_pendingThreads--;
-    auto it = m_data.threadNames.find( id );
-    assert( it != m_data.threadNames.end() && strcmp( it->second, "???" ) == 0 );
-    const auto sl = StoreString( str, sz );
-    it->second = sl.ptr;
+	assert( m_pendingThreads > 0 );
+	m_pendingThreads--;
+	auto it = m_data.threadNames.find( id );
+
+	assert( it != m_data.threadNames.end() && strcmp( it->second, "???" ) == 0 );
+
+	if ( sz == 0 )
+	{
+		const auto sl = StoreString( "<unknown>", strlen("<unknown>" ));
+		it->second = sl.ptr;
+	}
+	else
+	{
+		const auto sl = StoreString( str, sz );
+		it->second = sl.ptr;
+	}
 }
 
 void Worker::AddFiberName( uint64_t id, const char* str, size_t sz )
@@ -4556,6 +4823,9 @@ bool Worker::Process( const QueueItem& ev )
 {
     switch( ev.hdr.type )
     {
+    case QueueType::SyncValidation:
+        ProcessSyncValidation( ev.syncValidation );
+        break;
     case QueueType::ThreadContext:
         ProcessThreadContext( ev.threadCtx );
         break;
@@ -4608,6 +4878,12 @@ bool Worker::Process( const QueueItem& ev )
     case QueueType::ZoneValue:
         ProcessZoneValue( ev.zoneValue );
         break;
+    case QueueType::GlobalLockSyncBegin:
+        ProcessGlobalLockSyncBegin( ev.globalSyncBegin );
+        break;
+    case QueueType::GlobalLockSyncEnd:
+        ProcessGlobalLockSyncEnd( ev.globalSyncEnd );
+        break;
     case QueueType::LockAnnounce:
         ProcessLockAnnounce( ev.lockAnnounce );
         break;
@@ -4634,6 +4910,9 @@ bool Worker::Process( const QueueItem& ev )
         break;
     case QueueType::LockMark:
         ProcessLockMark( ev.lockMark );
+        break;
+    case QueueType::LockMarkFileLine:
+        ProcessLockMarkFileLine( ev.lockMarkFileLine );
         break;
     case QueueType::LockName:
         ProcessLockName( ev.lockName );
@@ -4846,6 +5125,13 @@ bool Worker::Process( const QueueItem& ev )
     }
 
     return m_failure == Failure::None;
+}
+
+void Worker::ProcessSyncValidation( const QueueSyncValidation &ev )
+{
+    assert( ev.threadCtx == m_threadCtx );
+    assert( ev.refTimeThread == m_refTimeThread );
+    assert( ev.refTimeSerial == m_refTimeSerial );
 }
 
 void Worker::ProcessThreadContext( const QueueThreadContext& ev )
@@ -5460,128 +5746,265 @@ void Worker::ProcessZoneValue( const QueueZoneValue& ev )
     }
 }
 
+LockMap *Worker::AllocLockMap( uint32_t lockid )
+{
+    LockMap *result = nullptr;
+    if ( m_lockMapFreeList )
+    {
+        LockMapFreeNode* node = m_lockMapFreeList;
+        m_lockMapFreeList = m_lockMapFreeList->next;
+
+        node->next = nullptr;
+        node->lockId = 0;
+        result = new(node) LockMap;
+    }
+    else
+    {
+        result = m_slab.AllocInit<LockMap>();
+        m_data.lockMap.emplace( lockid, result );
+    }
+    return result;
+}
+
+void Worker::FreeLockMap( LockMap* lm, uint32_t lockid )
+{
+    m_data.lockMap.erase( lockid );
+
+    for ( LockEventPtr evp : lm->timeline )
+    {
+        FreeLockEvent( evp.ptr );
+    }
+
+    lm->~LockMap();
+    LockMapFreeNode *freeNode = ( LockMapFreeNode * )lm;
+    freeNode->next = m_lockMapFreeList;
+    freeNode->lockId = lockid;
+    m_lockMapFreeList = freeNode;
+}
+
+void Worker::ProcessGlobalLockSyncBegin( const QueueGlobalLockSyncBegin& ev )
+{
+    m_totalLockObjCount = ev.count;
+}
+
+void Worker::ProcessGlobalLockSyncEnd( const QueueGlobalLockSyncEnd& ev )
+{
+    assert( m_data.activeLockMap.size() == ev.active );
+}
+
 void Worker::ProcessLockAnnounce( const QueueLockAnnounce& ev )
 {
     auto it = m_data.lockMap.find( ev.id );
     assert( it == m_data.lockMap.end() );
-    auto lm = m_slab.AllocInit<LockMap>();
+    auto lm = AllocLockMap( ev.id );
     lm->srcloc = ShrinkSourceLocation( ev.lckloc );
     lm->type = ev.type;
     lm->timeAnnounce = TscTime( ev.time );
     lm->timeTerminate = 0;
     lm->valid = true;
     lm->isContended = false;
+    lm->isTerminated = false;
     lm->lockingThread = 0;
+    lm->lockCount = 0;
     m_data.lockMap.emplace( ev.id, lm );
+    m_data.activeLockMap.emplace( ev.id, lm );
     CheckSourceLocation( ev.lckloc );
+
+    m_totalLockObjCount++;
 }
 
 void Worker::ProcessLockTerminate( const QueueLockTerminate& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
-    it->second->timeTerminate = TscTime( ev.time );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
+
+    const uint32_t lockId = it->first;
+    LockMap *lm = it->second;
+    lm->timeTerminate = TscTime( ev.time );
+    lm->isTerminated = true;
+
+    if ( !lm->threadList.empty() )
+    {
+        bool isSingleThreadLock = ( lm->threadList.size() == 1 );
+        if ( isSingleThreadLock )
+        {
+            const uint64_t threadId = lm->threadList.front();
+            m_data.threadToLockIdMap[ threadId ].erase( lockId );
+
+            if ( m_keepSingleThreadLocks )
+            {
+                m_data.threadToSingleLockIdMap[ threadId ].emplace( lockId );
+            }
+            else
+            {
+                m_data.lockMap.erase( lockId );
+                FreeLockMap( lm, lockId );
+            }
+        }
+    }
+
+    m_data.activeLockMap.erase( lockId );
+}
+
+LockEvent *Worker::AllocLockEvent( LockType type )
+{
+    LockEventFreeNode **freelist = ( type == LockType::Lockable ) ? &m_lockEvFreeList : &m_sharedLockEvFreeList;
+    LockEvent *result = nullptr;
+
+    if ( *freelist )
+    {
+        LockEventFreeNode *freeNode = (*freelist);
+        *freelist = (*freelist)->next;
+        memset( freeNode, 0, sizeof( LockEventFreeNode ) );
+        result = ( LockEvent * )freeNode;
+    }
+    else
+    {
+        result = type == LockType::Lockable ? m_slab.Alloc<LockEvent>() : m_slab.Alloc<LockEventShared>();
+    }
+
+    return result;
+}
+
+void Worker::FreeLockEvent( LockEvent *ev )
+{
+    if ( ev )
+    {
+        LockEventFreeNode **freelist = nullptr;
+
+        bool isShared = false;
+        switch ( ev->type )
+        {
+            case LockEvent::Type::Wait:
+            case LockEvent::Type::Obtain:
+            case LockEvent::Type::Release:
+            {
+                memset( ev, 0, sizeof( LockEvent ) );
+                freelist = &m_lockEvFreeList;
+            } break;
+
+            case LockEvent::Type::WaitShared:
+            case LockEvent::Type::ObtainShared:
+            case LockEvent::Type::ReleaseShared:
+            {
+                memset( ev, 0, sizeof( LockEventShared ) );
+                freelist = &m_sharedLockEvFreeList;
+            } break;
+
+            default:
+            {
+                assert( false );
+            } break;
+        }
+
+        if ( freelist )
+        {
+            LockEventFreeNode *freeNode = ( LockEventFreeNode * ) ev;
+            freeNode->next = (*freelist);
+            *freelist = freeNode;
+        }
+    }
 }
 
 void Worker::ProcessLockWait( const QueueLockWait& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
     auto& lock = *it->second;
 
-    auto lev = lock.type == LockType::Lockable ? m_slab.Alloc<LockEvent>() : m_slab.Alloc<LockEventShared>();
+    auto lev = AllocLockEvent( lock.type );
     const auto time = TscTime( RefTime( m_refTimeSerial, ev.time ) );
     lev->SetTime( time );
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::Wait;
 
-    InsertLockEvent( lock, lev, ev.thread, time );
+    InsertLockEvent( lock, lev, ev.thread, ev.id, time );
 }
 
 void Worker::ProcessLockObtain( const QueueLockObtain& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
     auto& lock = *it->second;
 
-    auto lev = lock.type == LockType::Lockable ? m_slab.Alloc<LockEvent>() : m_slab.Alloc<LockEventShared>();
+    auto lev = AllocLockEvent( lock.type );
     const auto time = TscTime( RefTime( m_refTimeSerial, ev.time ) );
     lev->SetTime( time );
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::Obtain;
 
-    InsertLockEvent( lock, lev, ev.thread, time );
+    InsertLockEvent( lock, lev, ev.thread, ev.id, time );
     lock.lockingThread = ev.thread;
 }
 
 void Worker::ProcessLockRelease( const QueueLockRelease& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
     auto& lock = *it->second;
 
-    auto lev = lock.type == LockType::Lockable ? m_slab.Alloc<LockEvent>() : m_slab.Alloc<LockEventShared>();
+    auto lev = AllocLockEvent( lock.type );
     const auto time = TscTime( RefTime( m_refTimeSerial, ev.time ) );
     lev->SetTime( time );
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::Release;
 
-    InsertLockEvent( lock, lev, lock.lockingThread, time );
+    InsertLockEvent( lock, lev, lock.lockingThread, ev.id, time );
 }
 
 void Worker::ProcessLockSharedWait( const QueueLockWait& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
     auto& lock = *it->second;
 
     assert( lock.type == LockType::SharedLockable );
-    auto lev = m_slab.Alloc<LockEventShared>();
+    auto lev = AllocLockEvent( LockType::SharedLockable );
     const auto time = TscTime( RefTime( m_refTimeSerial, ev.time ) );
     lev->SetTime( time );
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::WaitShared;
 
-    InsertLockEvent( lock, lev, ev.thread, time );
+    InsertLockEvent( lock, lev, ev.thread, ev.id, time );
 }
 
 void Worker::ProcessLockSharedObtain( const QueueLockObtain& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
     auto& lock = *it->second;
 
     assert( lock.type == LockType::SharedLockable );
-    auto lev = m_slab.Alloc<LockEventShared>();
+    auto lev = AllocLockEvent( LockType::SharedLockable );
     const auto time = TscTime( RefTime( m_refTimeSerial, ev.time ) );
     lev->SetTime( time );
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::ObtainShared;
 
-    InsertLockEvent( lock, lev, ev.thread, time );
+    InsertLockEvent( lock, lev, ev.thread, ev.id, time );
 }
 
 void Worker::ProcessLockSharedRelease( const QueueLockReleaseShared& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it != m_data.lockMap.end() );
+    auto it = m_data.activeLockMap.find( ev.id );
+    assert( it != m_data.activeLockMap.end() );
     auto& lock = *it->second;
 
     assert( lock.type == LockType::SharedLockable );
-    auto lev = m_slab.Alloc<LockEventShared>();
+    auto lev = AllocLockEvent( LockType::SharedLockable );
     const auto time = TscTime( RefTime( m_refTimeSerial, ev.time ) );
     lev->SetTime( time );
     lev->SetSrcLoc( 0 );
     lev->type = LockEvent::Type::ReleaseShared;
 
-    InsertLockEvent( lock, lev, ev.thread, time );
+    InsertLockEvent( lock, lev, ev.thread, ev.id, time );
 }
 
 void Worker::ProcessLockMark( const QueueLockMark& ev )
 {
     CheckSourceLocation( ev.srcloc );
-    auto lit = m_data.lockMap.find( ev.id );
-    assert( lit != m_data.lockMap.end() );
+    auto lit = m_data.activeLockMap.find( ev.id );
+    assert( lit != m_data.activeLockMap.end() );
     auto& lockmap = *lit->second;
     auto tid = lockmap.threadMap.find( ev.thread );
     assert( tid != lockmap.threadMap.end() );
@@ -5607,10 +6030,77 @@ void Worker::ProcessLockMark( const QueueLockMark& ev )
     }
 }
 
+void Worker::ProcessLockMarkFileLine( const QueueLockMarkFileLine& ev )
+{
+    static const SourceLocation emptySourceLocation = {};
+    if( m_data.checkSrclocLast != ev.file )
+    {
+        m_data.checkSrclocLast = ev.file;
+        if( m_data.sourceLocation.find( ev.file ) == m_data.sourceLocation.end() )
+        {
+            if( m_data.sourceLocation.size() > std::numeric_limits<int16_t>::max() )
+            {
+                SourceLocationOverflowFailure();
+            }
+            else
+            {
+                auto it = m_data.sourceLocation.emplace( ev.file, emptySourceLocation );
+
+                if( CheckString( ev.file ) )
+                {
+                    StringRef ref( StringRef::Ptr, ev.file );
+                    if( ev.file != 0 && m_checkedFileStrings.find( ref ) == m_checkedFileStrings.end() && m_pendingFileStrings.find( ref ) == m_pendingFileStrings.end() )
+                    {
+                        CacheSource( ref );
+                    }
+                }
+                else
+                {
+                    StringRef ref( StringRef::Ptr, ev.file );
+                    assert( m_checkedFileStrings.find( ref ) == m_checkedFileStrings.end() );
+                    if( m_pendingFileStrings.find( ref ) == m_pendingFileStrings.end() )
+                    {
+                        m_pendingFileStrings.emplace( ref );
+                    }
+                }
+
+                it.first->second.file = StringRef( StringRef::Ptr, ev.file );
+                it.first->second.line = ev.line;
+            }
+        }
+    }
+
+    auto lit = m_data.activeLockMap.find( ev.id );
+    assert( lit != m_data.activeLockMap.end() );
+    auto& lockmap = *lit->second;
+    auto tid = lockmap.threadMap.find( ev.thread );
+    assert( tid != lockmap.threadMap.end() );
+    const auto thread = tid->second;
+    auto it = lockmap.timeline.end();
+    for(;;)
+    {
+        --it;
+        if( it->ptr->thread == thread )
+        {
+            switch( it->ptr->type )
+            {
+            case LockEvent::Type::Obtain:
+            case LockEvent::Type::ObtainShared:
+            case LockEvent::Type::Wait:
+            case LockEvent::Type::WaitShared:
+                it->ptr->SetSrcLoc( ShrinkSourceLocation( ev.file ) );
+                return;
+            default:
+                break;
+            }
+        }
+    }
+}
+
 void Worker::ProcessLockName( const QueueLockName& ev )
 {
-    auto lit = m_data.lockMap.find( ev.id );
-    assert( lit != m_data.lockMap.end() );
+    auto lit = m_data.activeLockMap.find( ev.id );
+    assert( lit != m_data.activeLockMap.end() );
     lit->second->customName = StringIdx( GetSingleStringIdx() );
 }
 
@@ -5635,10 +6125,10 @@ void Worker::ProcessPlotDataImpl( uint64_t name, int64_t evTime, double val )
 {
     PlotData* plot = m_data.plots.Retrieve( name, [this] ( uint64_t name ) {
         auto plot = m_slab.AllocInit<PlotData>();
-        plot->name = name;
+        plot->name = StringRef( StringRef::Ptr, name);
         plot->type = PlotType::User;
         plot->format = PlotValueFormatting::Number;
-        plot->showSteps = false;
+        plot->drawType = PlotDrawType::Line;
         plot->fill = true;
         plot->color = 0;
         return plot;
@@ -5655,7 +6145,7 @@ void Worker::ProcessPlotConfig( const QueuePlotConfig& ev )
 {
     PlotData* plot = m_data.plots.Retrieve( ev.name, [this] ( uint64_t name ) {
         auto plot = m_slab.AllocInit<PlotData>();
-        plot->name = name;
+        plot->name = StringRef( StringRef::Ptr, name );
         plot->type = PlotType::User;
         return plot;
     }, [this]( uint64_t name ) {
@@ -5663,7 +6153,7 @@ void Worker::ProcessPlotConfig( const QueuePlotConfig& ev )
     } );
 
     plot->format = (PlotValueFormatting)ev.type;
-    plot->showSteps = ev.step;
+    plot->drawType = ( ev.step ? PlotDrawType::Step : PlotDrawType::Line );
     plot->fill = ev.fill;
     plot->color = ev.color & 0xFFFFFF;
 }
@@ -6747,10 +7237,11 @@ void Worker::ProcessSysTime( const QueueSysTime& ev )
     if( !m_sysTimePlot )
     {
         m_sysTimePlot = m_slab.AllocInit<PlotData>();
-        m_sysTimePlot->name = 0;
+        m_sysTimePlot->name.str = 0;
+        m_sysTimePlot->name.__data = 0;
         m_sysTimePlot->type = PlotType::SysTime;
         m_sysTimePlot->format = PlotValueFormatting::Percentage;
-        m_sysTimePlot->showSteps = false;
+        m_sysTimePlot->drawType = PlotDrawType::Line;
         m_sysTimePlot->fill = true;
         m_sysTimePlot->color = 0;
         m_sysTimePlot->min = val;
@@ -6778,10 +7269,10 @@ void Worker::ProcessSysPower( const QueueSysPower& ev )
     {
         CheckString( ev.name );
         PlotData* plot = m_slab.AllocInit<PlotData>();
-        plot->name = ev.name;
+        plot->name = StringRef( StringRef::Ptr, ev.name );
         plot->type = PlotType::Power;
         plot->format = PlotValueFormatting::Watt;
-        plot->showSteps = false;
+        plot->drawType = PlotDrawType::Line;
         plot->fill = true;
         plot->color = 0;
         m_data.plots.Data().push_back( plot );
@@ -7002,7 +7493,7 @@ void Worker::ProcessCpuTopology( const QueueCpuTopology& ev )
     core->second.emplace_back( ev.thread );
 
     assert( m_data.cpuTopologyMap.find( ev.thread ) == m_data.cpuTopologyMap.end() );
-    m_data.cpuTopologyMap.emplace( ev.thread, CpuThreadTopology { ev.package, ev.core } );
+    m_data.cpuTopologyMap.emplace( ev.thread, CpuThreadTopology{ ev.package, ev.core, ev.type } );
 }
 
 void Worker::ProcessMemNamePayload( const QueueMemNamePayload& ev )
@@ -7108,10 +7599,10 @@ void Worker::CreateMemAllocPlot( MemData& memdata )
 {
     assert( !memdata.plot );
     memdata.plot = m_slab.AllocInit<PlotData>();
-    memdata.plot->name = memdata.name;
+    memdata.plot->name = StringRef( StringRef::Ptr, memdata.name );
     memdata.plot->type = PlotType::Memory;
     memdata.plot->format = PlotValueFormatting::Memory;
-    memdata.plot->showSteps = true;
+    memdata.plot->drawType = PlotDrawType::Step;
     memdata.plot->fill = true;
     memdata.plot->color = 0;
     memdata.plot->data.push_back( { GetFirstTime(), 0. } );
@@ -7135,10 +7626,10 @@ void Worker::ReconstructMemAllocPlot( MemData& mem )
         plot->data.reserve_exact( psz, m_slab );
     }
 
-    plot->name = mem.name;
+    plot->name = StringRef( StringRef::Ptr, mem.name );
     plot->type = PlotType::Memory;
     plot->format = PlotValueFormatting::Memory;
-    plot->showSteps = true;
+    plot->drawType = PlotDrawType::Step;
     plot->fill = true;
     plot->color = 0;
 
@@ -7792,6 +8283,8 @@ void Worker::Write( FileWrite& f, bool fiDict )
 {
     DoPostponedWorkAll();
 
+    const int fileVer = FileVersion( FileHeader[FileHeaderMagic], FileHeader[FileHeaderMagic+1], FileHeader[FileHeaderMagic+2] );
+
     f.Write( FileHeader, sizeof( FileHeader ) );
 
     f.Write( &m_delay, sizeof( m_delay ) );
@@ -7838,6 +8331,15 @@ void Worker::Write( FileWrite& f, bool fiDict )
             for( auto& thread : core.second )
             {
                 f.Write( &thread, sizeof( thread ) );
+
+                uint32_t type = 0;
+                if ( m_data.cpuTopologyMap.contains( thread ) )
+                {
+                    CpuThreadTopology topo = m_data.cpuTopologyMap[ thread ];
+                    type = (uint32_t)topo.type;
+                }
+
+                f.Write( &type, sizeof( type ) );
             }
         }
     }
@@ -8106,17 +8608,17 @@ void Worker::Write( FileWrite& f, bool fiDict )
     }
 
     sz = m_data.plots.Data().size();
-    for( auto& plot : m_data.plots.Data() ) { if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone || plot->type == PlotType::AdditionalZone ) ) sz--; }
+    for( auto& plot : m_data.plots.Data() ) { if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone ) ) sz--; }
     f.Write( &sz, sizeof( sz ) );
     for( auto& plot : m_data.plots.Data() )
     {
-        if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone || plot->type == PlotType::AdditionalZone ) ) continue;
+        if( ( plot->type == PlotType::Memory || plot->type == PlotType::Zone ) ) continue;
         f.Write( &plot->type, sizeof( plot->type ) );
         f.Write( &plot->format, sizeof( plot->format ) );
-        f.Write( &plot->showSteps, sizeof( plot->showSteps ) );
+        f.Write( &plot->drawType, sizeof( plot->drawType ) );
         f.Write( &plot->fill, sizeof( plot->fill ) );
         f.Write( &plot->color, sizeof( plot->color ) );
-        f.Write( &plot->name, sizeof( plot->name ) );
+        f.Write( &plot->name.str, sizeof( plot->name.str ) );
         f.Write( &plot->min, sizeof( plot->min ) );
         f.Write( &plot->max, sizeof( plot->max ) );
         f.Write( &plot->sum, sizeof( plot->sum ) );

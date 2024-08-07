@@ -52,7 +52,36 @@ struct MessagesDraw;
 struct CpuUsageDraw;
 struct CpuCtxDraw;
 struct LockDraw;
+struct DrawLockInfo;
 struct PlotDraw;
+
+
+struct TimelineResizeBar
+{
+    ImGuiID id;
+    bool wasActive;
+    float thickness;
+    float defaultHeight;
+    float minHeight;
+    float maxHeight;
+    float height;
+
+    float uiHeight;
+
+    ImVec4 color;
+    ImVec4 colActive;
+    ImVec4 colHover;
+};
+
+
+struct TrackUiData
+{
+    TrackUiSettings settings;
+    int preventScroll;
+};
+
+
+float UpdateAndDrawResizeBar( TimelineResizeBar &resizeBar );
 
 
 struct CSortedThreads
@@ -61,10 +90,6 @@ struct CSortedThreads
     int32_t     m_nSort;
 };
 
-extern std::unordered_map < std::string, int32_t > g_MapThreadNameToPriority;
-
-
-extern bool g_bReApplyThreadOrder;
 
 class View
 {
@@ -113,6 +138,12 @@ public:
         double max;
     };
 
+    enum DrawPlotFlags : uint32_t
+    {
+        AddBackground = 1 << 0,
+        MultiPlot =     1 << 1,
+    };
+
     using SetTitleCallback = void(*)( const char* );
     using SetScaleCallback = void(*)( float );
     using AttentionCallback = void(*)();
@@ -120,6 +151,9 @@ public:
     View( void(*cbMainThread)(const std::function<void()>&, bool), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb, const Config& config );
     View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb, const Config& config );
     ~View();
+
+    void RequestSaveSettings();
+    void RequestSaveZonePlots();
 
     bool Draw();
     bool WasActive() const;
@@ -148,7 +182,10 @@ public:
     int GetNextGpuIdx() { return m_gpuIdx++; }
 
     const MessageData* GetMessageHighlight() const { return m_msgHighlight; }
+
+    enum { InvalidId = 0xFFFFFFFF };
     uint32_t GetLockInfoWindow() const { return m_lockInfoWindow; }
+    uint32_t GetLockHoverHighlight() const { return m_lockHoverHighlight;  }
 
     tracy_force_inline bool& Vis( const void* ptr )
     {
@@ -159,12 +196,14 @@ public:
 
     void HighlightThread( uint64_t thread );
     void ZoomToRange( int64_t start, int64_t end, bool pause = true );
-    bool DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vector<uint32_t>& plotDraw, int& offset, double fixedMax, bool bMultiPlot );
+    bool DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vector<uint32_t>& plotDraw, uint32_t iBegin, uint32_t iEnd, int& offset, double yAxisMax, uint32_t flags, int height );
     void DrawThread( const TimelineContext& ctx, const ThreadData& thread, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, const std::vector<SamplesDraw>& samplesDraw, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, int& offset, int depth, bool hasCtxSwitches, bool hasSamples );
     void DrawThreadMessagesList( const TimelineContext& ctx, const std::vector<MessagesDraw>& drawList, int offset, uint64_t tid );
     void DrawThreadOverlays( const ThreadData& thread, const ImVec2& ul, const ImVec2& dr );
     bool DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset, unordered_flat_map<uint64_t, int32_t>& depths );
     bool DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDraw>& cpuDraw, const std::vector<std::vector<CpuCtxDraw>>& ctxDraw, int& offset, bool hasCpuData, bool drawThreadInteractions );
+    void DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, int& offset, int depth );
+    void DrawTrackUiControls( const TimelineContext &ctx, const char *label, int maxDepth, int depth, TrackUiData &rData, TrackUiSettings &rVdTrackSettings, int start, int &offset, float xOffset );
 
 	const ThreadData *GetThreadDataForCpu( uint8_t cpu, int64_t time );
 
@@ -178,8 +217,6 @@ private:
         None,
         OpenFind
     };
-
-    enum { InvalidId = 0xFFFFFFFF };
 
     struct MemPathData
     {
@@ -237,6 +274,7 @@ private:
 
     void InitMemory();
     void InitTextEditor();
+    void InitResizeBar();
 
     bool DrawImpl();
     void DrawNotificationArea();
@@ -246,16 +284,18 @@ private:
     void DrawTimelineFrames( const FrameData& frames );
     void DrawTimeline();
     void DrawSampleList( const TimelineContext& ctx, const std::vector<SamplesDraw>& drawList, const Vector<SampleData>& vec, int offset );
-    void DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int offset, uint64_t tid );
+    void DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int offset, uint64_t tidOrCoreIndex );
     void DrawContextSwitchList( const TimelineContext& ctx, const std::vector<ContextSwitchDraw>& drawList, const Vector<ContextSwitchData>& ctxSwitch, int offset, int endOffset, bool isFiber );
+    void DrawContextSwitchList( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<ContextSwitchDraw> &drawList, int offset, int endOffset, bool isFiber );
     int DispatchGpuZoneLevel( const Vector<short_ptr<GpuEvent>>& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
     template<typename Adapter, typename V>
     int DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
     template<typename Adapter, typename V>
     int SkipGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
-    void DrawLockHeader( uint32_t id, const LockMap& lockmap, const SourceLocation& srcloc, bool hover, ImDrawList* draw, const ImVec2& wpos, float w, float ty, float offset, uint8_t tid );
+    void DrawLockHeader( uint32_t id, bool merged, const LockMap& lockmap, const SourceLocation& srcloc, bool hover, ImDrawList* draw, const ImVec2& wpos, float w, float ty, float offset, uint8_t tid );
     int DrawLocks( const TimelineContext& ctx, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, uint64_t tid, int _offset, LockHighlight& highlight );
-    void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name, bool bMultiPlot );
+    void DrawSingleLock( const TimelineContext& ctx, const LockDraw& lock, uint64_t tid, int _offset, LockHighlight& highlight, int& cnt );
+    void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, StringRef &name, bool bMultiPlot );
     void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, double val, PlotValueFormatting format, float PlotHeight );
     void DrawOptions();
     void DrawMessages();
@@ -331,6 +371,8 @@ private:
     void ShowZoneInfo( const ZoneEvent& ev );
     void ShowZoneInfo( const GpuEvent& ev, uint64_t thread );
 
+    void ZoneTooltipClamped( const ZoneEvent& ev, int64_t start, int64_t end );
+    void CpuZoneRangeTooltip( int64_t start, int64_t end, uint32_t coreIndex, uint64_t tid );
     void ZoneTooltip( const ZoneEvent& ev );
     void ZoneTooltip( const GpuEvent& ev );
     void CallstackTooltip( uint32_t idx );
@@ -338,7 +380,7 @@ private:
     void CrashTooltip();
 
     const ZoneEvent* GetZoneParent( const ZoneEvent& zone ) const;
-    const ZoneEvent* GetZoneParent( const ZoneEvent& zone, uint64_t tid ) const;
+    const ZoneEvent* GetZoneParent( const ZoneEvent& zone, uint64_t tid, const Worker &worker ) const;
     const ZoneEvent* GetZoneChild( const ZoneEvent& zone, int64_t time ) const;
     bool IsZoneReentry( const ZoneEvent& zone ) const;
     bool IsZoneReentry( const ZoneEvent& zone, uint64_t tid ) const;
@@ -357,6 +399,7 @@ private:
 #ifndef TRACY_NO_STATISTICS
     void FindZones();
     void FindZonesCompare();
+    void CreateZonePlot( const ZoneEvent &ev, PlotFilterType filterType, uint64_t filterId, bool bAggregatePerFrame, PlotData *pAddToExistingPlot );
 #endif
 
     std::vector<MemoryPage> GetMemoryPages() const;
@@ -364,10 +407,12 @@ private:
     void SmallCallstackButton( const char* name, uint32_t callstack, int& idx, bool tooltip = true );
     void DrawCallstackCalls( uint32_t callstack, uint16_t limit ) const;
     void SetViewToLastFrames();
+    int64_t GetZoneChildTimeClamped( const ZoneEvent& zone, int64_t start, int64_t end );
     int64_t GetZoneChildTime( const ZoneEvent& zone );
     int64_t GetZoneChildTime( const GpuEvent& zone );
     int64_t GetZoneChildTimeFast( const ZoneEvent& zone );
     int64_t GetZoneChildTimeFastClamped( const ZoneEvent& zone, int64_t t0, int64_t t1 );
+    int64_t GetZoneSelfTimeClamped( const ZoneEvent& zone, int64_t start, int64_t end );
     int64_t GetZoneSelfTime( const ZoneEvent& zone );
     int64_t GetZoneSelfTime( const GpuEvent& zone );
     bool GetZoneRunningTime( const ContextSwitch* ctx, const ZoneEvent& ev, int64_t& time, uint64_t& cnt );
@@ -385,6 +430,8 @@ private:
 
     void Attention( bool& alreadyDone );
     void UpdateTitle();
+
+    TimelineResizeBar m_framesResize;
 
     unordered_flat_map<uint64_t, bool> m_visibleMsgThread;
     unordered_flat_map<uint64_t, bool> m_waitStackThread;
@@ -438,6 +485,12 @@ private:
     DecayValue<bool> m_forceConnectionPopup = false;
     uint64_t m_totalMemory;
 
+    int64_t m_timeAtMouse;
+    double m_nsPerPixel;
+	
+    bool m_requestSaveSettings;
+    bool m_requestSaveZonePlots;
+    bool m_requestLoadZonePlots;
     ViewData m_vd;
     TimelineController m_tc;
     KeyboardNavigation m_kbNavCtrl;
@@ -500,6 +553,8 @@ private:
     bool m_showAnnotationList = false;
     bool m_showWaitStacks = false;
 
+    bool m_showCoreView = false;
+	
     AccumulationMode m_statAccumulationMode = AccumulationMode::SelfOnly;
     bool m_statSampleTime = true;
     int m_statMode = 0;
@@ -752,6 +807,7 @@ private:
         bool ignoreCase = false;
         bool link = true;
         std::unique_ptr<Worker> second;
+		std::string secondFilename;
         std::unique_ptr<UserData> userData;
         std::thread loadThread;
         BadVersionState badVer;
@@ -769,6 +825,9 @@ private:
         float average[2];
         float median[2];
         int64_t total[2];
+		double sumSq[2];
+		int64_t min[2];
+		int64_t max[2];
         int minBinVal = 1;
         int compareMode = 0;
         bool diffDone = false;
@@ -777,15 +836,25 @@ private:
         std::vector<const char*> secondUnique;
         std::vector<std::pair<const char*, std::string>> diffs;
 
+		// filter options
+		FindZone::GroupBy groupBy = FindZone::GroupBy::NoGrouping;
+		Vector<uint64_t> groups[ 2 ];
+		int selGroup[ 2 ] = { 0, 0 };
+
         void ResetSelection()
         {
             for( int i=0; i<2; i++ )
             {
                 sorted[i].clear();
                 sortedNum[i] = 0;
-                average[i] = 0;
-                median[i] = 0;
+                average[i] = 0.0f;
+                median[i] = 0.0f;
                 total[i] = 0;
+				sumSq[i] = 0.0;
+				min[i] = std::numeric_limits<int64_t>::max();
+				max[i] = std::numeric_limits<int64_t>::min();
+				groups[i].clear();
+				selGroup[i] = 0;
             }
         }
 
@@ -801,6 +870,7 @@ private:
             thisUnique.clear();
             secondUnique.clear();
             diffs.clear();
+			groupBy = FindZone::GroupBy::NoGrouping;
         }
     } m_compare;
 

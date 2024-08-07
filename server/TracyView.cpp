@@ -45,11 +45,16 @@ namespace tracy
 double s_time = 0;
 
 View::View( void(*cbMainThread)(const std::function<void()>&, bool), const char* addr, uint16_t port, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb, const Config& config )
-    : m_worker( addr, port )
+    : m_worker( addr, port, config.keepSingleThreadLocks )
     , m_staticView( false )
     , m_viewMode( ViewMode::LastFrames )
     , m_viewModeHeuristicTry( true )
     , m_forceConnectionPopup( true, true )
+    , m_timeAtMouse( -1 )
+    , m_nsPerPixel( 0 )
+    , m_requestSaveSettings( false )
+    , m_requestSaveZonePlots( false )
+    , m_requestLoadZonePlots( false )
     , m_tc( *this, m_worker, config.threadedRendering )
     , m_frames( nullptr )
     , m_messagesScrollBottom( true )
@@ -67,7 +72,16 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), const char*
     InitMemory();
     InitTextEditor();
 
+    m_userData.LoadStateJson( m_vd );
+
     m_vd.frameTarget = config.targetFps;
+    m_vd.keepSingleThreadLocks = config.keepSingleThreadLocks;
+    if ( !m_vd.keepSingleThreadLocks )
+    {
+        m_vd.lockDrawFlags &= ~( ViewData::ELockDrawVisFlags::SingleThread );
+    }
+
+    InitResizeBar();
 }
 
 View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f, ImFont* fixedWidth, ImFont* smallFont, ImFont* bigFont, SetTitleCallback stcb, SetScaleCallback sscb, AttentionCallback acb, const Config& config )
@@ -75,6 +89,9 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f
     , m_filename( f.GetFilename() )
     , m_staticView( true )
     , m_viewMode( ViewMode::Paused )
+    , m_timeAtMouse( -1 )
+    , m_nsPerPixel( 0 )
+    , m_requestSaveSettings( false )
     , m_tc( *this, m_worker, config.threadedRendering )
     , m_frames( m_worker.GetFramesBase() )
     , m_messagesScrollBottom( false )
@@ -97,7 +114,10 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f
     m_vd.zvEnd = m_worker.GetLastTime();
     m_userData.StateShouldBePreserved();
     m_userData.LoadState( m_vd );
+    m_userData.LoadStateJson( m_vd );
     m_userData.LoadAnnotations( m_annotations );
+    m_requestLoadZonePlots = true;
+
     m_sourceRegexValid = m_userData.LoadSourceSubstitutions( m_sourceSubstitutions );
 
     if( m_worker.GetCallstackFrameCount() == 0 ) m_showUnknownFrames = false;
@@ -109,21 +129,43 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f
     {
         m_shortenName = (ShortenName)m_vd.zoneNameShortening;
     }
+
+    m_vd.keepSingleThreadLocks = config.keepSingleThreadLocks;
+    if ( !m_vd.keepSingleThreadLocks )
+    {
+        m_vd.lockDrawFlags &= ~( ViewData::ELockDrawVisFlags::SingleThread );
+    }
+	
+    InitResizeBar();
 }
 
 View::~View()
 {
+    const bool saveGlobalSettings = !m_worker.IsDataStatic();
+
     m_worker.Shutdown();
 
     m_userData.SaveState( m_vd );
+    m_userData.SaveStateJson( m_vd, saveGlobalSettings );
     m_userData.SaveAnnotations( m_annotations );
     m_userData.SaveSourceSubstitutions( m_sourceSubstitutions );
+    m_userData.SaveZonePlotsJson( m_worker, m_worker.GetPlots() );
 
     if( m_compare.loadThread.joinable() ) m_compare.loadThread.join();
     if( m_saveThread.joinable() ) m_saveThread.join();
 
     if( m_frameTexture ) FreeTexture( m_frameTexture, m_cbMainThread );
     if( m_playback.texture ) FreeTexture( m_playback.texture, m_cbMainThread );
+}
+
+void View::RequestSaveSettings()
+{
+    m_requestSaveSettings = true;
+}
+
+void View::RequestSaveZonePlots()
+{
+    m_requestSaveZonePlots = true;
 }
 
 void View::InitMemory()
@@ -156,6 +198,22 @@ void View::InitTextEditor()
 {
     m_sourceView = std::make_unique<SourceView>();
     m_sourceViewFile = nullptr;
+}
+
+void View::InitResizeBar()
+{
+    const float defaultHeight = 50.0f;
+    m_framesResize.id = 0;
+    m_framesResize.wasActive = false;
+    m_framesResize.thickness = 8.0f;
+    m_framesResize.defaultHeight = defaultHeight;
+    m_framesResize.minHeight = 5.0f;
+    m_framesResize.maxHeight = 500.0f;
+    m_framesResize.height = defaultHeight;
+    m_framesResize.uiHeight = 0.0f;
+    m_framesResize.color = ImVec4( 0.5f, 0.5f, 0.5f, 1.0f );
+    m_framesResize.colActive = ImVec4( 0.9f, 1.0f, 0.9f, 1.0f );
+    m_framesResize.colHover = ImVec4( 0.8f, 0.8f, 0.8f, 1.0f );
 }
 
 void View::ViewSource( const char* fileName, int line )
@@ -302,6 +360,29 @@ static_assert( sizeof( CompressionName ) == sizeof( CompressionDesc ), "Unmatche
 
 bool View::Draw()
 {
+    if ( m_requestSaveSettings )
+    {
+        m_requestSaveSettings = false;
+        if ( m_worker.IsDataStatic() )
+        {
+            m_userData.SaveStateJson( m_vd, false );
+        }
+    }
+
+#ifndef TRACY_NO_STATISTICS
+    if ( m_requestSaveZonePlots )
+    {
+        m_requestSaveZonePlots = false;
+        m_userData.SaveZonePlotsJson( m_worker, m_worker.GetPlots() );
+    }
+
+    if ( m_requestLoadZonePlots && m_worker.AreSourceLocationZonesReady() )
+    {
+        m_requestLoadZonePlots = false;
+        m_userData.LoadZonePlotsJson( m_worker );
+    }
+#endif
+
     HandshakeStatus status = (HandshakeStatus)m_worker.GetHandshakeStatus();
     switch( status )
     {
@@ -869,6 +950,19 @@ bool View::DrawImpl()
     ToggleButton( ICON_FA_SCALE_BALANCED " Compare", m_compare.show );
     ImGui::SameLine();
     ToggleButton( ICON_FA_FINGERPRINT " Info", m_showInfo );
+    if( m_worker.HasContextSwitches() )
+    {
+        ImGui::SameLine();
+        ToggleButton( ICON_FA_MICROCHIP " Core View", m_showCoreView );
+        if ( m_showCoreView )
+        {
+            ImGui::SetItemTooltip( "Click to switch to Threads View" );
+        }
+        else
+        {
+            ImGui::SetItemTooltip( "Click to switch to Core View" );
+        }
+    }
     ImGui::SameLine();
     if( ImGui::Button( ICON_FA_SCREWDRIVER_WRENCH ) ) ImGui::OpenPopup( "ToolsPopup" );
     if( ImGui::BeginPopup( "ToolsPopup" ) )
@@ -885,7 +979,11 @@ bool View::DrawImpl()
         }
         ToggleButton( ICON_FA_NOTE_STICKY " Annotations", m_showAnnotationList );
         ToggleButton( ICON_FA_RULER " Limits", m_showRanges );
+#ifndef TRACY_NO_STATISTICS
         const auto cscnt = m_worker.GetContextSwitchSampleCount();
+#else
+        const auto cscnt = 0;
+#endif
         if( ButtonDisablable( ICON_FA_HOURGLASS_HALF " Wait stacks", cscnt == 0 ) )
         {
             m_showWaitStacks = true;
@@ -1095,7 +1193,48 @@ bool View::DrawImpl()
     {
         const auto s = std::min( m_setRangePopup.min, m_setRangePopup.max );
         const auto e = std::max( m_setRangePopup.min, m_setRangePopup.max );
-        if( ImGui::Selectable( ICON_FA_MAGNIFYING_GLASS " Limit find zone time range" ) )
+		if ( m_setRangePopup.pZone )
+		{
+			if ( m_worker.HasZoneExtra( *m_setRangePopup.pZone ) && m_worker.GetZoneExtra( *m_setRangePopup.pZone ).name.Active() )
+			{
+				TextFocused( "Zone name:", m_worker.GetString( m_worker.GetZoneExtra( *m_setRangePopup.pZone ).name ) );
+				ImGui::Indent();
+				if ( ImGui::Selectable( ICON_FA_CHART_LINE " Plot by zone name" ) )
+				{
+					CreateZonePlot( *m_setRangePopup.pZone, PlotFilterType::ZoneName, m_worker.GetZoneExtra( *m_setRangePopup.pZone ).name.Idx(), false, nullptr );
+				}
+				if ( ImGui::Selectable( ICON_FA_CHART_LINE " Plot by zone name (per-frame total)" ) )
+				{
+					CreateZonePlot( *m_setRangePopup.pZone, PlotFilterType::ZoneName, m_worker.GetZoneExtra( *m_setRangePopup.pZone ).name.Idx(), true, nullptr );
+				}
+				ImGui::Unindent();
+				ImGui::Separator();
+			}
+
+			auto &srcloc = m_worker.GetSourceLocation( m_setRangePopup.pZone->SrcLoc() );
+			if ( srcloc.name.active )
+			{
+				TextFocused( "Source location:", m_worker.GetString( srcloc.name ) );
+			}
+			else
+			{
+				TextFocused( "Source location:", m_worker.GetString( srcloc.function ) );
+			}
+			ImGui::SameLine();
+			TextDisabledUnformatted( LocationToString( m_worker.GetString( srcloc.file ), srcloc.line ) );
+			ImGui::Indent();
+			if ( ImGui::Selectable( ICON_FA_CHART_LINE " Plot by src loc" ) )
+			{
+				CreateZonePlot( *m_setRangePopup.pZone, PlotFilterType::NoFilter, 0, false, nullptr );
+			}
+			if ( ImGui::Selectable( ICON_FA_CHART_LINE " Plot by src loc (per-frame total)" ) )
+			{
+				CreateZonePlot( *m_setRangePopup.pZone, PlotFilterType::NoFilter, 0, true, nullptr );
+			}
+			ImGui::Unindent();
+			ImGui::Separator();
+		}
+		if( ImGui::Selectable( ICON_FA_MAGNIFYING_GLASS " Limit find zone time range" ) )
         {
             m_findZone.range.active = true;
             m_findZone.range.min = s;
@@ -1244,7 +1383,10 @@ bool View::DrawImpl()
         const auto inFlight = m_worker.GetSendInFlight();
         if( inFlight > 1 || ( inFlight == 1 && !m_worker.WasDisconnectIssued() ) )
         {
-            ImGui::OpenPopup( "Connection lost!" );
+			if ( !m_disconnectIssued )
+			{
+				ImGui::OpenPopup( "Connection lost!" );
+			}
         }
     }
     if( ImGui::BeginPopupModal( "Connection lost!", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
@@ -1355,15 +1497,18 @@ bool View::Save( const char* fn, FileWrite::Compression comp, int zlevel, bool b
     if( !f ) return false;
 
     m_userData.StateShouldBePreserved();
+    if( !m_userData.Valid() ) m_userData.Init( m_worker.GetCaptureProgram().c_str(), m_worker.GetCaptureTime() );
     m_saveThreadState.store( SaveThreadState::Saving, std::memory_order_relaxed );
     m_saveThread = std::thread( [this, f{std::move( f )}, buildDict] {
         std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
         m_worker.Write( *f, buildDict );
+        m_userData.SaveStateJson( m_vd, false );
         f->Finish();
         const auto stats = f->GetCompressionStatistics();
         m_srcFileBytes.store( stats.first, std::memory_order_relaxed );
         m_dstFileBytes.store( stats.second, std::memory_order_relaxed );
         m_saveThreadState.store( SaveThreadState::NeedsJoin, std::memory_order_release );
+        m_requestSaveZonePlots = true;
     } );
 
     return true;
