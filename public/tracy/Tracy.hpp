@@ -163,6 +163,7 @@ template<class T> T ceil( T x )
 #define TracySetProgramName(x)
 
 #define TracyFiberEnter(x)
+#define TracyFiberEnterHint(x,y)
 #define TracyFiberLeave
 
 #else
@@ -331,7 +332,8 @@ template<class T> T ceil( T x )
 #define TracySetProgramName( name ) tracy::GetProfiler().SetProgramName( name );
 
 #ifdef TRACY_FIBERS
-#  define TracyFiberEnter( fiber ) tracy::Profiler::EnterFiber( fiber )
+#  define TracyFiberEnter( fiber ) tracy::Profiler::EnterFiber( fiber, 0 )
+#  define TracyFiberEnterHint( fiber, groupHint ) tracy::Profiler::EnterFiber( fiber, groupHint )
 #  define TracyFiberLeave tracy::Profiler::LeaveFiber()
 #endif
 
