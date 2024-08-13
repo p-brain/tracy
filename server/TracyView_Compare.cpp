@@ -134,10 +134,11 @@ bool View::FindMatchingZone( int prev0, int prev1, int flags )
     return found;
 }
 
-static std::vector<std::string> SplitLines( const char* data, size_t sz )
+static std::vector<std::string> SplitLines( const char* data, size_t sz_ )
 {
     std::vector<std::string> ret;
     auto txt = data;
+    ptrdiff_t sz = (ptrdiff_t)sz_;
     for(;;)
     {
         auto end = txt;

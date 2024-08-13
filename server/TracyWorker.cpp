@@ -4050,7 +4050,7 @@ void Worker::AddSourceLocationPayload( const char* data, size_t sz )
         auto slptr = m_slab.Alloc<SourceLocation>();
         memcpy( slptr, &srcloc, sizeof( srcloc ) );
         uint32_t idx = m_data.sourceLocationPayload.size();
-        if( idx+1 > std::numeric_limits<int16_t>::max() )
+        if( idx+1 > (uint32_t)std::numeric_limits<int16_t>::max() )
         {
             SourceLocationOverflowFailure();
             return;

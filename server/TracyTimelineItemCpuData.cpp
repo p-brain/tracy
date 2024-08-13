@@ -221,7 +221,7 @@ void TimelineItemCpuData::PreprocessCpuUsage( const TimelineContext& ctx )
             }
             else
             {
-                const auto test = ( time << 16 ) | 0xFFFF;
+                const uint64_t test = ( time << 16 ) | 0xFFFF;
                 auto it = std::upper_bound( itBegin, ctxUsage.end(), test, [] ( const auto& l, const auto& r ) { return l < r._time_other_own; } );
                 if( it == ctxUsage.end() ) return;
                 if( it == ctxUsage.begin() )

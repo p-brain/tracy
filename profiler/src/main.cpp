@@ -103,7 +103,7 @@ static bool dpiScaleOverriddenFromEnv = false;
 static float userScale = 1.f;
 static Filters* filt;
 static RunQueue mainThreadTasks;
-static uint32_t updateVersion = 0;
+static int updateVersion = 0;
 static bool showReleaseNotes = false;
 static std::string releaseNotes;
 
@@ -245,17 +245,17 @@ int main( int argc, char** argv )
         {
             initFileOpen = std::unique_ptr<tracy::FileRead>( tracy::FileRead::Open( argv[1] ) );
         }
-        catch( const tracy::UnsupportedVersion& e )
+        catch( const tracy::UnsupportedVersion& )
         {
             fprintf( stderr, "The file you are trying to open is from the future version.\n" );
             exit( 1 );
         }
-        catch( const tracy::NotTracyDump& e )
+        catch( const tracy::NotTracyDump& )
         {
             fprintf( stderr, "The file you are trying to open is not a tracy dump.\n" );
             exit( 1 );
         }
-        catch( const tracy::LegacyVersion& e )
+        catch( const tracy::LegacyVersion& )
         {
             fprintf( stderr, "The file you are trying to open is from a legacy version.\n" );
             exit( 1 );

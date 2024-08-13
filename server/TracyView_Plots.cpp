@@ -166,7 +166,7 @@ bool View::DrawPlot( const TimelineContext &ctx, PlotData &plot, const std::vect
                 {
                     DrawLine( draw, dpos + ImVec2( x, ymin ), dpos + ImVec2( x, ymax ), color );
 
-                    for( int i=0; i<cnt; i++ )
+                    for( unsigned int i=0; i<cnt; i++ )
                     {
                         const auto is = i0 + i;
                         const auto& vs = vec[is];
