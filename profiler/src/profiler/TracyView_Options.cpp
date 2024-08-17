@@ -10,12 +10,8 @@
 #include "TracyView.hpp"
 #include "TracyStorage.hpp"
 
-
-
-
 namespace tracy
 {
-
 
 static bool SmallButtonWithSize(const char* label, float diffToMaxX )
 {
@@ -276,7 +272,7 @@ void View::DrawOptions()
     ImGui::PopStyleVar();
     ImGui::Unindent();
     m_vd.dynamicColors = ival;
-    ival = std::clamp( ( int ) m_vd.zoneNameShortening, ( int ) ShortenName::Never, ( int ) ShortenName::NoSpaceAndNormalize );
+    ival = std::clamp( ( int ) m_vd.shortenName, ( int ) ShortenName::Never, ( int ) ShortenName::NoSpaceAndNormalize );
     ImGui::TextUnformatted( ICON_FA_RULER_HORIZONTAL " Zone name shortening" );
     ImGui::Indent();
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
@@ -287,7 +283,6 @@ void View::DrawOptions()
     ImGui::RadioButton( "As needed + normalize", &ival, (uint8_t)ShortenName::NoSpaceAndNormalize );
     ImGui::PopStyleVar();
     ImGui::Unindent();
-    m_vd.zoneNameShortening = ival;
     m_vd.shortenName = (ShortenName)ival;
 
     if ( !m_showCoreView )
@@ -997,6 +992,10 @@ void View::DrawOptions()
             ImGui::EndCombo();
         }
 
+        ImGui::SameLine();
+        int pH = m_vd.plotHeight;
+        ImGui::SliderInt( "Plot heights", &pH, 30, 200 );
+        m_vd.plotHeight = pH;
 
         const auto expand = ImGui::TreeNode( "Plots" );
         ImGui::SameLine();

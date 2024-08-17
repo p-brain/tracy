@@ -27,6 +27,7 @@ set(SERVER_FILES
     TracyAchievements.cpp
     TracyBadVersion.cpp
     TracyColor.cpp
+    TracyCpuZoneBuffer.cpp
     TracyEventDebug.cpp
     TracyFileselector.cpp
     TracyFilesystem.cpp
@@ -41,10 +42,12 @@ set(SERVER_FILES
     TracyTexture.cpp
     TracyTimelineController.cpp
     TracyTimelineItem.cpp
+    TracyTimelineItemCore.cpp
     TracyTimelineItemCpuData.cpp
     TracyTimelineItemGpu.cpp
     TracyTimelineItemPlot.cpp
     TracyTimelineItemThread.cpp
+    TracyTimelinePreprocessor.cpp
     TracyUserData.cpp
     TracyUtility.cpp
     TracyView.cpp

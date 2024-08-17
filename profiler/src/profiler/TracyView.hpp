@@ -27,8 +27,6 @@
 #include "../server/tracy_robin_hood.h"
 #include "../server/TracyVector.hpp"
 
-#include "helpers.h"
-
 namespace tracy
 {
 

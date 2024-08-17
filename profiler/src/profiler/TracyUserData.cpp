@@ -95,6 +95,7 @@ static void ReadJsonValue_( const rapidjson::Value &src, const char* name, T& ds
 static void LoadCommonJson( const rapidjson::Value& v, ViewDataCommon& data )
 {
 #define ReadJsonValue( val, name, data ) if ( (val).HasMember( #name ) ) { ReadJsonValue_( (val), #name, (data).name ); }
+#define ReadJsonValueTyped( val, name, data, type ) if ( (val).HasMember( #name ) ) { ReadJsonValue_( (val), #name, (type&)(data).name ); }
 
     using namespace rapidjson;
     ReadJsonValue( v, drawGpuZones, data );
@@ -114,10 +115,11 @@ static void LoadCommonJson( const rapidjson::Value& v, ViewDataCommon& data )
     ReadJsonValue( v, dynamicColors, data );
     ReadJsonValue( v, forceColors, data );
     ReadJsonValue( v, ghostZones, data );
+    ReadJsonValue( v, plotHeight, data );
     ReadJsonValue( v, frameTarget, data );
     ReadJsonValue( v, flFrameHeightScale, data );
     ReadJsonValue( v, frameOverviewMaxTimeMS, data );
-    ReadJsonValue( v, zoneNameShortening, data );
+    ReadJsonValueTyped( v, shortenName, data, uint8_t );
     ReadJsonValue( v, stackCollapseMode, data );
     ReadJsonValue( v, stackCollapseClamp, data );
     ReadJsonValue( v, uiControlLoc, data );
@@ -127,13 +129,15 @@ static void LoadCommonJson( const rapidjson::Value& v, ViewDataCommon& data )
     ReadJsonValue( v, drawMousePosTime, data );
     ReadJsonValue( v, autoZoneStats, data );
 
+#undef ReadJsonValueTyped
 #undef ReadJsonValue
 }
 
 
 static void SaveCommonJson( rapidjson::Document::AllocatorType& alloc, rapidjson::Value& v, const ViewDataCommon& data )
 {
-#define WriteJsonValue( val, name, data ) (val).AddMember( #name, Value( (data).name ), alloc )
+#define WriteJsonValue( val, name, data ) ( val ).AddMember( #name, Value( ( data ).name ), alloc )
+#define WriteJsonValueTyped( val, name, data, type ) ( val ).AddMember( #name, Value( (const type&)( data ).name ), alloc )
 
     using namespace rapidjson;
 
@@ -154,10 +158,11 @@ static void SaveCommonJson( rapidjson::Document::AllocatorType& alloc, rapidjson
     WriteJsonValue( v, dynamicColors, data );
     WriteJsonValue( v, forceColors, data );
     WriteJsonValue( v, ghostZones, data );
+    WriteJsonValue( v, plotHeight, data );
     WriteJsonValue( v, frameTarget, data );
     WriteJsonValue( v, flFrameHeightScale, data );
     WriteJsonValue( v, frameOverviewMaxTimeMS, data );
-    WriteJsonValue( v, zoneNameShortening, data );
+    WriteJsonValueTyped( v, shortenName, data, uint8_t );
     WriteJsonValue( v, stackCollapseMode, data );
     WriteJsonValue( v, stackCollapseClamp, data );
     WriteJsonValue( v, uiControlLoc, data );
@@ -167,6 +172,7 @@ static void SaveCommonJson( rapidjson::Document::AllocatorType& alloc, rapidjson
     WriteJsonValue( v, drawMousePosTime, data );
     WriteJsonValue( v, autoZoneStats, data );
 
+#undef WriteJsonValueTyped
 #undef WriteJsonValue
 }
 

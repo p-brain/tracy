@@ -1,11 +1,13 @@
 P4IGNORE
 .p4ignore
+build/_generated/
 .vs/
-win32/x64/
 .git/
 .github/
 .vscode
-/vcpkg/vcpkg/
 *.tss
 *.vcxproj.user
 *.args.json
+build/win32/_temp
+build/win32/Debug
+build/win32/Release

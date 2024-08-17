@@ -71,11 +71,13 @@ struct ViewDataCommon
     uint8_t forceColors = false;
     uint8_t ghostZones = true;
 
+    uint32_t plotHeight = 100;
+
     uint32_t frameTarget = 60;
     float flFrameHeightScale = 1.0f;
     int32_t frameOverviewMaxTimeMS = 15;
 
-    uint8_t zoneNameShortening = 4;
+    ShortenName shortenName = ShortenName::NoSpaceAndNormalize;
     uint8_t stackCollapseMode = CollapseDynamic;
     int32_t stackCollapseClamp = 0;
     uint8_t uiControlLoc = UiCtrlLocRight;
@@ -187,11 +189,6 @@ struct ViewData : public ViewDataCommon
     typedef std::unordered_map < std::string, Plot > GlobalPlotMap;
     GlobalThreadMap globalThreads;
     GlobalPlotMap globalPlots;
-
-	// Severin TODO
-	ShortenName shortenName = ShortenName::NoSpaceAndNormalize;
-	uint32_t plotHeight = 100;
-
 };
 
 

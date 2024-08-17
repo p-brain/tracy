@@ -6,11 +6,14 @@ set (ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../")
 # Dependencies are taken from the system first and if not found, they are pulled with CPM and built from source
 
 include(FindPkgConfig)
+include(ExternalProject)
 include(${CMAKE_CURRENT_LIST_DIR}/CPM.cmake)
 
 option(DOWNLOAD_CAPSTONE "Force download capstone" ON)
 option(DOWNLOAD_GLFW "Force download glfw" OFF)
 option(DOWNLOAD_FREETYPE "Force download freetype" OFF)
+option(DOWNLOAD_RAPIDJSON "Force download freetype" OFF)
+
 
 # capstone
 
@@ -74,6 +77,28 @@ else()
     add_library(TracyFreetype INTERFACE)
     target_link_libraries(TracyFreetype INTERFACE freetype)
 endif()
+
+# rapidjson
+
+pkg_check_modules(RAPIDJSON rapidjson)
+if(RAPIDJSON_FOUND AND NOT DOWNLOAD_RAPIDJSON)
+    message(STATUS "RapidJson found: ${RAPIDJSON}")
+    add_library(TracyRapidJson INTERFACE)
+    include_directories(${rapidjson_SOURCE_DIR}/include)
+else()
+    CPMAddPackage(
+        NAME rapidjson
+        VERSION 1.1.0
+        GITHUB_REPOSITORY Tencent/rapidjson
+        GIT_TAG ab1842a2dae061284c0a62dca1cc6d5e7e37e346
+        OPTIONS "RAPIDJSON_BUILD_TESTS OFF"
+                "RAPIDJSON_BUILD_DOC OFF"
+                "RAPIDJSON_BUILD_EXAMPLES OFF"
+    )
+    add_library(TracyRapidJson INTERFACE)
+    include_directories(${rapidjson_SOURCE_DIR}/include)
+endif()
+
 
 # zstd
 

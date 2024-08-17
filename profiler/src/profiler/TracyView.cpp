@@ -105,7 +105,6 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f
     InitTextEditor();
 	SetupConfig( config );
     m_vd.zvStart = m_worker.GetFirstTime();
-	m_vd.zoneNameShortening = (uint8_t)m_shortenName;
     m_vd.zvEnd = m_worker.GetLastTime();
     m_userData.StateShouldBePreserved();
     m_userData.LoadState( m_vd );
@@ -120,20 +119,15 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f
 
     m_vd.frameTarget = config.targetFps;
 
-    if ( ( m_vd.zoneNameShortening >= ( uint8_t ) ShortenName::Never ) && ( m_vd.zoneNameShortening <= ( uint8_t ) ShortenName::NoSpaceAndNormalize ) )
-    {
-        m_shortenName = (ShortenName)m_vd.zoneNameShortening;
-    }
-
     m_vd.keepSingleThreadLocks = config.keepSingleThreadLocks;
     if ( !m_vd.keepSingleThreadLocks )
     {
         m_vd.lockDrawFlags &= ~( ViewData::ELockDrawVisFlags::SingleThread );
     }
-	
+
     InitResizeBar();
 
-	Achieve( "loadTrace" );
+    Achieve( "loadTrace" );
 }
 
 View::~View()

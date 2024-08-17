@@ -18,6 +18,7 @@ struct Config
     int dynamicColors = 1;
     bool forceColors = false;
     int shortenName = (int)ShortenName::NoSpaceAndNormalize;
+    bool keepSingleThreadLocks = false;
 };
 
 }
