@@ -354,7 +354,7 @@ function Rewrite-Projects
                             $copyCmd += "`n"
                             $copyCmd += "if not exist `"$dstExecutablePath\`" (mkdir `"$dstExecutablePath`")"
                             $copyCmd += "`n"
-                            $copyCmd += "copy `"`$(TargetPath)`" `"$dstExecutablePath\Tracy.exe`""
+                            $copyCmd += "copy `"`$(OutDir)`$(TargetName).*`" `"$dstExecutablePath\Tracy.*`""
                             $copyCmd += "`n"
                             $copyCmd += "endlocal"
                             $copyCmd += "`n"
