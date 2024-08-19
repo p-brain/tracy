@@ -264,7 +264,7 @@ static bool SaveConfig()
     fprintf( f, "enabled = %i\n", (int)s_config.achievements );
     fprintf( f, "asked = %i\n", (int)s_config.achievementsAsked );
 
-    fprintf( f, "[locks]\n" );
+    fprintf( f, "\n[locks]\n" );
     fprintf( f, "keepSingleThreadLocks = %i\n", (int)s_config.keepSingleThreadLocks );
 
     fclose( f );

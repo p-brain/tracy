@@ -249,11 +249,7 @@ function Rewrite-Projects
 
     $depsFilter = $( $cmakeProjects; $externDeps )
 
-    $PSScriptRootSlashes = $PSScriptRoot.Replace( '\', '/' )
-
-    $srcRoot = Join-Path -Path $PSScriptRoot -ChildPath ""
-    $srcRootSlashes = (Join-Path -Path $PSScriptRootSlashes -ChildPath "").Replace( '\', '/' )
-
+    $srcRoot = Join-Path -Path "$PSScriptRoot" -ChildPath ""
     $srcPathAbs = Join-Path -Path "$PSScriptRoot" -ChildPath $srcPath
     $dstPathAbs = Join-Path -Path $srcRoot -ChildPath $dstPath
     $srcLevels = $srcRoot.TrimEnd( '\' ).Split( '\' )
@@ -275,10 +271,11 @@ function Rewrite-Projects
 
             # Replace absolute source paths with absolute destination paths
             $content = $content.Replace( $srcPathAbs, $dstPathAbs )
+            $content = $content.Replace( $srcPathAbs.Replace('\', '/'), $dstPathAbs )
 
-            # Replace absolute paths with relative paths
-            $content = $content.Replace( "$srcRootSlashes", $slashRepl)
-            $content = $content.Replace( "$srcRoot", $backSlashRepl )
+            # # Replace absolute paths with relative paths
+            $content = $content.Replace( $srcRoot.Replace('\', '/'), $slashRepl)
+            $content = $content.Replace( $srcRoot, $backSlashRepl )
 
             [XML]$xml = $content
             $nsUri = "http://schemas.microsoft.com/developer/msbuild/2003"
@@ -320,6 +317,31 @@ function Rewrite-Projects
                     foreach( $itemDefGroup in $itemDefGroupNodes ) {
                         $cond = $itemDefGroup.GetAttribute( "Condition" )
                         if ( $cond -ne $null -and $cond -like  "*`$(Configuration)*==*Release*") {
+
+                            $xmlCompile = $itemDefGroup.SelectSingleNode( "ns:ClCompile", $nsManager )
+                            if ( $xmlCompile -ne $null ) {
+                                $xmlDbgInfoFormat = $xmlCompile.SelectSingleNode( "ns:DebugInformationFormat", $nsManager )
+                                if ( $xmlDbgInfoFormat -ne $null ) {
+                                    $xmlDbgInfoFormat.ParentNode.RemoveChild($xmlDbgInfoFormat) | Out-Null
+                                }
+
+                                $xmlDbgInfoFormat = $xml.CreateElement( "DebugInformationFormat", $nsUri )
+                                $xmlDbgInfoFormat.InnerXml = "ProgramDatabase"
+                                $xmlCompile.AppendChild( $xmlDbgInfoFormat ) | Out-Null
+                            }
+
+                            $xmlLink = $itemDefGroup.SelectSingleNode( "ns:Link", $nsManager )
+                            if ( $xmlLink -ne $null ) {
+                                $xmlGenDbg = $xmlLink.SelectSingleNode( "ns:GenerateDebugInformation", $nsManager )
+                                if ( $xmlGenDbg -ne $null ) {
+                                    $xmlGenDbg.ParentNode.RemoveChild($xmlGenDbg) | Out-Null
+                                }
+
+                                $xmlGenDbg = $xml.CreateElement( "GenerateDebugInformation", $nsUri )
+                                $xmlGenDbg.InnerXml = "true"
+                                $xmlLink.AppendChild( $xmlGenDbg ) | Out-Null
+                            }
+
                             $xmlPostChild = $itemDefGroup.SelectSingleNode( "ns:PostBuildEvent", $nsManager )
                             if ( $xmlPostChild -ne $null ) {
                                 $xmlPostChild.ParentNode.RemoveChild($xmlPostChild) | Out-Null
@@ -434,11 +456,23 @@ if ( $help ) {
     Write-Host "  -keepGenerated  Do not delete the _generated folder" -ForegroundColor DarkCyan
 } else {
     if ((Get-Command "cl.exe" -ErrorAction SilentlyContinue) -eq $null) {
+        $defaultVs = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\Launch-VsDevShell.ps1'
+        if ( Test-Path -Path $defaultVs ) {
+            Invoke-Expression "& '$defaultVs'"
+            Set-Location -Path $PSScriptRoot
+        }
+    }
+
+    if ((Get-Command "cl.exe" -ErrorAction SilentlyContinue) -eq $null) {
         Write-Host ""
-        Write-Host "Please run %VsInstallDir%\Common7\Tools\Launch-VsDevShell.ps1 first" -ForegroundColor Red
+        Write-Host "Please run " -NoNewline
+        Write-Host "%YOUR_VS_INSTALL_DIR%\Common7\Tools\Launch-VsDevShell.ps1" -ForegroundColor Red -NoNewline
+        Write-Host " first"
         Write-Host "Usage: " $MyInvocation.MyCommand.Name " [-dest sln_output_path]" -ForegroundColor DarkCyan
         Write-Host ""
-        Write-Host "Alternatively: open Visual Studio Command Prompt (or manually run vcvars64.bat in cmd.exe) first" -ForegroundColor Red
+        Write-Host "Alternatively: " -NoNewline
+        Write-Host "open Visual Studio Command Prompt (or manually run vcvars64.bat in cmd.exe)" -ForegroundColor Red -NoNewline
+        Write-Host " first"
         Write-Host  "Usage: powershell -File " $MyInvocation.MyCommand.Name " [-dest sln_output_path]" -ForegroundColor DarkCyan
         Write-Host ""
         Exit 1
@@ -476,7 +510,18 @@ if ( $help ) {
             }
 
             Print-PostGenerateMessage
-            Write-Host "Press any key to quit..." -ForegroundColor Green
+
+            $destDirAbs = Join-Path -Path $PSScriptRoot -ChildPath $dest
+            $slnFiles = Get-ChildItem -Path $destDirAbs -Filter "*.sln"
+            if ( $slnFiles.Length -gt 0 ) {
+                $slnFile = $slnFiles[0]
+                $destSlnAbs = Join-Path -Path $destDirAbs -ChildPath $slnFile
+                Write-Host ""
+                Write-Host "Solution generated in: " -NoNewline
+                Write-Host "'$destSlnAbs'" -ForegroundColor Green
+                Write-Host ""
+            }
+            Write-Host "Press any key to quit..." -ForegroundColor DarkGreen
         } else {
             Write-Host "Projects have not been created!" -ForegroundColor Red
             Write-Host "Press any key to quit..." -ForegroundColor Red
