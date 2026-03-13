@@ -9,7 +9,11 @@ namespace tracy
 
 enum class QueueType : uint8_t
 {
+    ConnectionSyncBegin,
+    ConnectionSyncEnd,
     SyncValidation,
+    SyncValidationThread,
+    SyncValidationContext,
 
     ZoneText,
     ZoneName,
@@ -68,6 +72,7 @@ enum class QueueType : uint8_t
     SourceCodeMetadata,
     FiberEnter,
     FiberLeave,
+    HwCounterConfig,
     Terminate,
     KeepAlive,
     ThreadContext,
@@ -104,12 +109,14 @@ enum class QueueType : uint8_t
     HwSampleCacheMiss,
     HwSampleBranchRetired,
     HwSampleBranchMiss,
+    HwCounter,
     PlotConfig,
     ParamSetup,
     AckServerQueryNoop,
     AckSourceCodeNotAvailable,
     AckSymbolCodeNotAvailable,
     CpuTopology,
+    CacheTopology,
     SingleStringData,
     SecondStringData,
     MemNamePayload,
@@ -132,11 +139,47 @@ enum class QueueType : uint8_t
 
 #pragma pack( push, 1 )
 
+struct QueueConnectionSyncBegin
+{
+    int64_t time;
+};
+
+struct QueueConnectionSyncEnd
+{
+    int64_t time;
+};
+
 struct QueueSyncValidation
 {
+    enum Flags : uint8_t
+    {
+        None       = 0,
+        ThreadCtx  = (1 << 0),
+        TimeThread = (1 << 1),
+        TimeSerial = (1 << 2),
+        TimeCtx    = (1 << 3),
+    };
+
+    uint8_t flags;
     uint32_t threadCtx;
     int64_t refTimeThread;
     int64_t refTimeSerial;
+    int64_t refTimeCtx;
+};
+
+struct QueueSyncValidationThread
+{
+    uint32_t threadId;
+    uint32_t stackDepth;
+    uint32_t validationId;
+    int64_t refTimeThread;
+};
+
+struct QueueSyncValidationContext
+{
+    uint32_t threadId;
+    uint8_t context;
+    uint32_t stackDepth;
 };
 
 struct QueueThreadContext
@@ -210,6 +253,7 @@ struct QueueFrameMark
 {
     int64_t time;
     uint64_t name;      // ptr
+    uint64_t id;
 };
 
 struct QueueFrameVsync
@@ -649,6 +693,19 @@ struct QueueHwSample
     int64_t time;
 };
 
+struct QueueHwCounter
+{
+    int64_t time;
+    uint64_t count;
+    uint8_t cpu;
+};
+
+struct QueueHwCounterConfig
+{
+    uint64_t name;          // ptr
+    uint64_t description;   // ptr
+};
+
 enum class PlotFormatType : uint8_t
 {
     Number,
@@ -678,7 +735,7 @@ struct QueueSourceCodeNotAvailable
     uint32_t id;
 };
 
-enum class CpuType : uint32_t
+enum class CpuType : uint8_t
 {
     Normal = 0,
     IntelPCore,
@@ -689,10 +746,33 @@ enum class CpuType : uint32_t
 
 struct QueueCpuTopology
 {
-    uint32_t package;
+    uint64_t coreInGroupMask;
+    uint16_t package;
+    uint16_t group;
     uint32_t core;
     uint32_t thread;
     CpuType type;
+};
+
+enum class CacheType : uint8_t
+{
+    Unknown,
+    Unified,
+    Instruction,
+    Data,
+
+    Count,
+};
+
+struct QueueCacheTopology
+{
+    uint64_t coreInGroupMask;
+    uint16_t package;
+    uint16_t group;
+    uint32_t size;
+    uint16_t linesize;
+    uint8_t level;
+    CacheType type;
 };
 
 struct QueueExternalNameMetadata
@@ -730,7 +810,11 @@ struct QueueItem
     QueueHeader hdr;
     union
     {
+        QueueConnectionSyncBegin connectionSyncBegin;
+        QueueConnectionSyncEnd connectionSyncEnd;
         QueueSyncValidation syncValidation;
+        QueueSyncValidationThread syncValidationThread;
+        QueueSyncValidationContext syncValidationContext;
 
         QueueThreadContext threadCtx;
         QueueZoneBegin zoneBegin;
@@ -752,8 +836,8 @@ struct QueueItem
         QueueSourceLocation srcloc;
         QueueZoneTextFat zoneTextFat;
         QueueZoneTextFatThread zoneTextFatThread;
-        QueueGlobalLockSyncBegin globalSyncBegin;
-        QueueGlobalLockSyncEnd globalSyncEnd;
+        QueueGlobalLockSyncBegin globalLockSyncBegin;
+        QueueGlobalLockSyncEnd globalLockSyncEnd;
         QueueLockAnnounce lockAnnounce;
         QueueLockTerminate lockTerminate;
         QueueLockWait lockWait;
@@ -809,9 +893,12 @@ struct QueueItem
         QueueThreadWakeup threadWakeup;
         QueueTidToPid tidToPid;
         QueueHwSample hwSample;
+        QueueHwCounter hwCounter;
+        QueueHwCounterConfig hwCounterConfig;
         QueuePlotConfig plotConfig;
         QueueParamSetup paramSetup;
         QueueCpuTopology cpuTopology;
+        QueueCacheTopology cacheTopology;
         QueueExternalNameMetadata externalNameMetadata;
         QueueSymbolCodeMetadata symbolCodeMetadata;
         QueueSourceCodeMetadata sourceCodeMetadata;
@@ -826,7 +913,12 @@ struct QueueItem
 enum { QueueItemSize = sizeof( QueueItem ) };
 
 static constexpr size_t QueueDataSize[] = {
+    sizeof( QueueHeader ) + sizeof( QueueConnectionSyncBegin ),
+    sizeof( QueueHeader ) + sizeof( QueueConnectionSyncEnd ),
     sizeof( QueueHeader ) + sizeof( QueueSyncValidation ),
+    sizeof( QueueHeader ) + sizeof( QueueSyncValidationThread ),
+    sizeof( QueueHeader ) + sizeof( QueueSyncValidationContext ),
+
     sizeof( QueueHeader ),                                  // zone text
     sizeof( QueueHeader ),                                  // zone name
     sizeof( QueueHeader ) + sizeof( QueueMessage ),
@@ -884,6 +976,7 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ),                                  // SourceCodeMetadata - not for wire transfer
     sizeof( QueueHeader ) + sizeof( QueueFiberEnter ),
     sizeof( QueueHeader ) + sizeof( QueueFiberLeave ),
+    sizeof( QueueHeader ) + sizeof( QueueHwCounterConfig ),
     // above items must be first
     sizeof( QueueHeader ),                                  // terminate
     sizeof( QueueHeader ),                                  // keep alive
@@ -915,18 +1008,20 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueSysTime ),
     sizeof( QueueHeader ) + sizeof( QueueSysPower ),
     sizeof( QueueHeader ) + sizeof( QueueTidToPid ),
-    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // cpu cycle
-    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // instruction retired
-    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // cache reference
-    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // cache miss
-    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // branch retired
-    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // branch miss
+    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // cpu cycle (sampling mode)
+    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // instruction retired (sampling mode)
+    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // cache reference (sampling mode)
+    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // cache miss (sampling mode)
+    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // branch retired (sampling mode)
+    sizeof( QueueHeader ) + sizeof( QueueHwSample ),        // branch miss (sampling mode)
+    sizeof( QueueHeader ) + sizeof( QueueHwCounter ),       // hw counter attached to ETW events
     sizeof( QueueHeader ) + sizeof( QueuePlotConfig ),
     sizeof( QueueHeader ) + sizeof( QueueParamSetup ),
     sizeof( QueueHeader ),                                  // server query acknowledgement
     sizeof( QueueHeader ) + sizeof( QueueSourceCodeNotAvailable ),
     sizeof( QueueHeader ),                                  // symbol code not available
     sizeof( QueueHeader ) + sizeof( QueueCpuTopology ),
+    sizeof( QueueHeader ) + sizeof( QueueCacheTopology ),
     sizeof( QueueHeader ),                                  // single string data
     sizeof( QueueHeader ),                                  // second string data
     sizeof( QueueHeader ) + sizeof( QueueMemNamePayload ),

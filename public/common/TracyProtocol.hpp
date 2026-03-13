@@ -9,8 +9,9 @@ namespace tracy
 
 constexpr unsigned Lz4CompressBound( unsigned isize ) { return isize + ( isize / 255 ) + 16; }
 
-enum : uint32_t { ProtocolVersion = 68 };
-enum : uint16_t { BroadcastVersion = 3 };
+enum : uint32_t { ForceProtocolVersionConflict = 0 };
+enum : uint32_t { ProtocolVersion = ForceProtocolVersionConflict + 71 };
+enum : uint16_t { BroadcastVersion = 4 };
 
 using lz4sz_t = uint32_t;
 
@@ -33,6 +34,7 @@ enum HandshakeStatus : uint8_t
 
 enum { WelcomeMessageProgramNameSize = 64 };
 enum { WelcomeMessageHostInfoSize = 1024 };
+enum { ProfilerMessageSize = 64 };
 
 #pragma pack( push, 1 )
 
@@ -121,7 +123,30 @@ struct OnDemandPayloadMessage
 enum { OnDemandPayloadMessageSize = sizeof( OnDemandPayloadMessage ) };
 
 
+enum BroadcastFlags
+{
+    BroadcastFlags_None = 0,
+    BroadcastFlags_DenyConnection = 1 << 0,
+};
+
+
+static_assert( std::numeric_limits<uint8_t>::max() >= WelcomeMessageProgramNameSize );
+static_assert( std::numeric_limits<uint8_t>::max() >= ProfilerMessageSize );
+
 struct BroadcastMessage
+{
+    uint16_t broadcastVersion;
+    uint16_t listenPort;
+    uint32_t protocolVersion;
+    uint64_t pid;
+    int32_t activeTime;        // in seconds
+    uint64_t flags;
+    uint8_t nameLen;
+    uint8_t msgLen;
+    char strBuffer[int( WelcomeMessageProgramNameSize) + int( ProfilerMessageSize) ];
+};
+
+struct BroadcastMessage_v3
 {
     uint16_t broadcastVersion;
     uint16_t listenPort;
@@ -158,6 +183,7 @@ struct BroadcastMessage_v0
 };
 
 enum { BroadcastMessageSize = sizeof( BroadcastMessage ) };
+enum { BroadcastMessageSize_v3 = sizeof( BroadcastMessage_v3 ) };
 enum { BroadcastMessageSize_v2 = sizeof( BroadcastMessage_v2 ) };
 enum { BroadcastMessageSize_v1 = sizeof( BroadcastMessage_v1 ) };
 enum { BroadcastMessageSize_v0 = sizeof( BroadcastMessage_v0 ) };

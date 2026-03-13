@@ -330,7 +330,7 @@ bool TimelineItemThread::DrawContents( const TimelineContext& ctx, int& offset )
 
     std::sort( m_lockDraw.begin(), m_lockDraw.end(), [] ( const auto &lhs, const auto &rhs ) { return ( lhs->id < rhs->id ); } );
 
-    m_view.DrawThread( ctx, *m_thread, m_draw, m_ctxDraw, m_samplesDraw, m_lockDraw, offset, depth, m_hasCtxSwitch, m_hasSamples );
+    m_view.DrawThread( ctx, *m_thread, m_draw, m_ctxDraw, m_samplesDraw, m_lockDraw, m_hwCounterDraw, offset, depth, m_hasCtxSwitch, m_hasSamples, m_hasHwCounter );
 
     if( (depth == 0) && !hasMessageCheck && !hasLocksCheck )
     {
@@ -354,13 +354,14 @@ bool TimelineItemThread::PreventScrolling() const
 void TimelineItemThread::DrawUiControls( const TimelineContext &ctx, int start, int &offset, float xOffset )
 {
     ViewData::Track& rThreadSettings = m_view.GetViewData().threads[ m_thread->id ];
-    m_view.DrawTrackUiControls( ctx, HeaderLabel(), m_maxDepth, m_depth, m_trackUiData, rThreadSettings.ui, start, offset, xOffset );
+    m_view.DrawTrackUiControls( ctx, HeaderLabel(), m_maxDepth, m_depth, m_trackUiData, rThreadSettings, start, offset, xOffset );
 }
 
 void TimelineItemThread::DrawFinished()
 {
     m_samplesDraw.clear();
     m_ctxDraw.clear();
+    m_hwCounterDraw.Reset();
     m_draw.clear();
     m_msgDraw.clear();
     m_lockDraw.clear();
@@ -373,6 +374,7 @@ void TimelineItemThread::Preprocess( const TimelineContext& ctx, TaskDispatch& t
 {
     assert( m_samplesDraw.empty() );
     assert( m_ctxDraw.empty() );
+    assert( m_hwCounterDraw.m_items.empty() );
     assert( m_draw.empty() );
     assert( m_msgDraw.empty() );
     assert( m_lockDraw.empty() );
@@ -426,6 +428,20 @@ void TimelineItemThread::Preprocess( const TimelineContext& ctx, TaskDispatch& t
             // as context switch shadows will usually be projected down onto zones.
             td.Queue( [this, &ctx, ctxSwitch, visible] {
                 PreprocessContextSwitches( ctx, *ctxSwitch, visible );
+            } );
+        }
+    }
+
+    m_hasHwCounter = false;
+    if ( vd.drawHwCounter )
+    {
+        auto ctxSwitch = m_worker.GetContextSwitchData( m_thread->id );
+        auto cpuData = m_worker.GetCpuData();
+        const auto cpuCnt = m_worker.GetCpuDataCpuCount();
+        if ( ctxSwitch && cpuCnt )
+        {
+            td.Queue( [this, &ctx, ctxSwitch, cpuData, cpuCnt, visible] {
+                PreprocessHwCounter( ctx, *ctxSwitch, cpuData, cpuCnt, visible );
             } );
         }
     }
@@ -640,6 +656,82 @@ void TimelineItemThread::PreprocessContextSwitches( const TimelineContext& ctx, 
             ++it;
         }
     }
+}
+
+void TimelineItemThread::PreprocessHwCounter( const TimelineContext &ctx, const ContextSwitch &ctxSwitch, const CpuData *pCpuData, int cpuDataCount, bool visible )
+{
+    const auto nspx = ctx.nspx;
+    const auto vStart = ctx.vStart;
+    const auto vEnd = ctx.vEnd;
+
+    auto &ctxSwitchVec = ctxSwitch.v;
+    auto ctxSwitchIt = std::lower_bound( ctxSwitchVec.begin(), ctxSwitchVec.end(), std::max<int64_t>( 0, vStart ), [] ( const auto &l, const auto &r ) { return ( l.IsEndValid() ? l.End() : l.Start() ) < r; } );
+    if ( ctxSwitchIt == ctxSwitchVec.end() ) return;
+    if ( ctxSwitchIt != ctxSwitchVec.begin() ) --ctxSwitchIt;
+
+    auto ctxSwitchItEnd = std::lower_bound( ctxSwitchIt, ctxSwitchVec.end(), vEnd, [] ( const auto &l, const auto &r ) { return l.Start() < r; } );
+    if ( ctxSwitchIt == ctxSwitchItEnd ) return;
+    if ( ctxSwitchItEnd != ctxSwitchVec.end() ) ++ctxSwitchItEnd;
+    
+    m_hwCounterDraw.m_maxCount = 0;
+
+    if ( !visible ) return;
+
+    // Given a thread, find on which core it is actually running in order to draw hw counter for that core.
+    while ( ctxSwitchIt < ctxSwitchItEnd )
+    {
+        int64_t currentCtxStartTime = ctxSwitchIt->Start();
+        int64_t currentCtxEndTime = ctxSwitchIt->IsEndValid() ? ctxSwitchIt->End() : ctxSwitchIt->Start();
+        if ( currentCtxStartTime == currentCtxEndTime )
+        {
+            ++ctxSwitchIt;
+            continue;
+        }
+        
+        uint8_t cpu = ctxSwitchIt->Cpu();
+        if ( ( cpu >= cpuDataCount ) || pCpuData[ cpu ].hwCounter.empty() )
+        {
+            ++ctxSwitchIt;
+            continue;
+        }
+
+        const Vector<HwCounterData>& hwCounter = pCpuData[ cpu ].hwCounter;
+        if ( ( hwCounter.front().time.Val() > currentCtxEndTime ) || ( hwCounter.back().time.Val() < currentCtxStartTime ) )
+        {
+            ++ctxSwitchIt;
+            continue;
+        }
+
+        // Iterate hw counter vector for the given core & period of time
+        auto beginIt = std::lower_bound( hwCounter.begin(), hwCounter.end(), currentCtxStartTime, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
+        auto endIt = std::lower_bound( beginIt, hwCounter.end(), currentCtxEndTime, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
+
+        auto it = beginIt;
+        while ( it < endIt )
+        {
+            auto next = it + 1;
+            // only draw hw counter count for the given viewing area
+            if ( ( next->time.Val() < vStart ) || ( it->time.Val() > vEnd ) )
+            {
+                it = next;
+                continue;
+            }
+            
+            uint64_t count = next->count - it->count;
+            m_hwCounterDraw.AddDrawItem( it->time, next->time, count, next->time.Val() - it->time.Val() );
+
+            it = next;
+        }
+        
+        ++ctxSwitchIt;
+    }
+
+    m_hwCounterDraw.m_name = m_worker.GetHwCounterName();
+    m_hwCounterDraw.m_description = m_worker.GetHwCounterDescription();
+
+    m_view.UpdateHwCounterMaxValues( m_hwCounterDraw.m_maxCount, m_hwCounterDraw.m_maxRate );
+
+    m_hasHwCounter = !m_hwCounterDraw.m_items.empty();
 }
 
 void TimelineItemThread::PreprocessSamples( const TimelineContext& ctx, const Vector<SampleData>& vec, bool visible, int yPos )

@@ -401,6 +401,22 @@ struct HwSampleData
 
 enum { HwSampleDataSize = sizeof( HwSampleData ) };
 
+struct HwCounterData
+{
+    Int48 time;
+    uint64_t count;
+};
+
+enum { HwCounterDataSize = sizeof( HwCounterData ) };
+
+struct HwCounterConfig
+{
+    StringIdx name;
+    StringIdx description;
+};
+
+enum { HwCounterConfigSize = sizeof( HwCounterConfig ) };
+
 
 struct LockEvent
 {
@@ -952,6 +968,8 @@ struct ContextSwitch
 struct CpuData
 {
     Vector<ContextSwitchCpu> cs;
+    // TODO Do we need to use a SortedVector ???
+    Vector<HwCounterData> hwCounter;
 };
 
 struct CpuThreadData

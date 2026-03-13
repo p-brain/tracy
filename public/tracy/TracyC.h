@@ -137,7 +137,7 @@ struct ___tracy_source_location_data
 struct ___tracy_c_zone_context
 {
     uint32_t id;
-    int active;
+    uint32_t active;
 };
 
 struct ___tracy_gpu_time_data
@@ -409,6 +409,9 @@ TRACY_API void ___tracy_fiber_leave( void );
 #endif
 
 #endif
+
+struct TracyExternalAPI_t;
+TRACY_API void SetupTracyExternalApi( TracyExternalAPI_t* pApi );
 
 #ifdef __cplusplus
 }

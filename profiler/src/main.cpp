@@ -80,6 +80,9 @@ struct ClientData
     uint64_t pid;
     std::string procName;
     std::string address;
+
+    std::string message;
+    bool denyConnection;
 };
 
 enum class ViewShutdown { False, True, Join };
@@ -469,16 +472,40 @@ static void UpdateBroadcastClients()
                 if( broadcastVersion <= tracy::BroadcastVersion )
                 {
                     uint32_t protoVer;
-                    char procname[tracy::WelcomeMessageProgramNameSize];
+                    char procname[tracy::WelcomeMessageProgramNameSize + 1] = {0};
+                    char message[tracy::ProfilerMessageSize + 1] = {0};
+                    bool denyConnection = false;
                     int32_t activeTime;
                     uint16_t listenPort;
                     uint64_t pid;
 
                     switch( broadcastVersion )
                     {
-                    case 3:
+                    case 4:
                     {
                         tracy::BroadcastMessage bm;
+                        memcpy( &bm, msg, len );
+                        protoVer = bm.protocolVersion;
+                        size_t nameCopyLen = std::min<size_t>( bm.nameLen, tracy::WelcomeMessageProgramNameSize );
+                        size_t msgCopyLen = std::min<size_t>( bm.msgLen, tracy::ProfilerMessageSize );
+                        size_t copyOffset = 0;
+                        memcpy( procname, bm.strBuffer + copyOffset, nameCopyLen );
+                        procname[ nameCopyLen ] = 0;
+                        copyOffset += nameCopyLen;
+                        memcpy( message, bm.strBuffer + copyOffset, msgCopyLen );
+                        message[ msgCopyLen ] = 0;
+                        copyOffset += nameCopyLen;
+
+                        activeTime = bm.activeTime;
+                        listenPort = bm.listenPort;
+                        pid = bm.pid;
+                        denyConnection = (bm.flags & tracy::BroadcastFlags_DenyConnection);
+                        break;
+                    }
+                    case 3:
+                    {
+                        if( len > sizeof( tracy::BroadcastMessage_v3 ) ) continue;
+                        tracy::BroadcastMessage_v3 bm;
                         memcpy( &bm, msg, len );
                         protoVer = bm.protocolVersion;
                         strcpy( procname, bm.programName );
@@ -549,7 +576,7 @@ static void UpdateBroadcastClients()
                                     } );
                             }
                             resolvLock.unlock();
-                            clients.emplace( clientId, ClientData { time, protoVer, activeTime, listenPort, pid, procname, std::move( ip ) } );
+                            clients.emplace( clientId, ClientData { time, protoVer, activeTime, listenPort, pid, procname, std::move( ip ), message, denyConnection } );
                         }
                         else
                         {
@@ -558,7 +585,9 @@ static void UpdateBroadcastClients()
                             it->second.port = listenPort;
                             it->second.pid = pid;
                             it->second.protocolVersion = protoVer;
+                            it->second.denyConnection = denyConnection;
                             if( strcmp( it->second.procName.c_str(), procname ) != 0 ) it->second.procName = procname;
+                            if( strcmp( it->second.message.c_str(), message ) != 0 ) it->second.message = message;
                         }
                     }
                     else if( it != clients.end() )
@@ -1106,8 +1135,19 @@ static void DrawContents()
                 if( filt->FailProg( v.second.procName.c_str() ) ) continue;
                 ImGuiSelectableFlags flags = ImGuiSelectableFlags_SpanAllColumns;
                 if( badProto ) flags |= ImGuiSelectableFlags_Disabled;
+                if ( v.second.denyConnection ) flags |= ImGuiSelectableFlags_Disabled;
                 ImGui::PushID( idx++ );
+
+                int pushedStyles = 0;
+                if ( v.second.denyConnection )
+                {
+                    ImGui::PushStyleColor( ImGuiCol_Text, 0xff5555ff ); pushedStyles++;
+                }
                 const bool selected = ImGui::Selectable( name->second.c_str(), &sel, flags );
+                if ( v.second.denyConnection )
+                {
+                    ImGui::PopStyleColor(  pushedStyles );
+                }
                 ImGui::PopID();
                 if( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
                 {
@@ -1133,6 +1173,14 @@ static void DrawContents()
                             }
                         }
                         ImGui::Separator();
+                    }
+                    if ( v.second.denyConnection )
+                    {
+                        tracy::TextColoredUnformatted( 0xFF4444FF, "Not accepting connections." );
+                    }
+                    if ( !v.second.message.empty() )
+                    {
+                        tracy::TextColoredUnformatted( 0xFF00E1E1, v.second.message.c_str() );
                     }
                     tracy::TextFocused( "IP:", v.second.address.c_str() );
                     tracy::TextFocused( "Port:", portstr );

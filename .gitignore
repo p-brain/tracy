@@ -41,5 +41,7 @@ compile_commands.json
 *.TaskCanvasSL
 */build/win32/*
 *.tss
+Directory.Build.props
 profiler/build
-profiler/Directory.Build.props
+capture/build
+capture/tracy-capture.exe

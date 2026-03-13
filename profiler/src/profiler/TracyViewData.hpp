@@ -37,6 +37,9 @@ struct RangeSlim
 	const ZoneEvent *pZone = nullptr;
 };
 
+const float MIN_FRAMES_HEIGHT=50.0f;
+const float MAX_FRAMES_HEIGHT=500.0f;
+
 
 struct ViewDataCommon
 {
@@ -51,6 +54,8 @@ struct ViewDataCommon
     static inline const char *const ppszPlotViz[ 3 ] = { "Disable Plots", "Plots Above Zones", "Plots Below Zone" };
 
     enum ELockDrawVisFlags { None = 0, Contended = (1 << 0), Uncontended = ( 1 << 1 ), SingleThread = ( 1 << 2 ), SingleTerminated = ( 1 << 3 ) };
+
+    enum class EHwCounterDrawMode : uint8_t { BarGraph_Count = 0, BarGraph_Rate, TextMode, DrawModeCount };
 
     uint8_t drawGpuZones = true;
     uint8_t drawZones = true;
@@ -74,7 +79,7 @@ struct ViewDataCommon
     uint32_t plotHeight = 100;
 
     uint32_t frameTarget = 60;
-    float flFrameHeightScale = 1.0f;
+    float flFrameHeight = MIN_FRAMES_HEIGHT;
     int32_t frameOverviewMaxTimeMS = 15;
 
     ShortenName shortenName = ShortenName::NoSpaceAndNormalize;
@@ -87,8 +92,14 @@ struct ViewDataCommon
 
     uint8_t viewContextSwitchStack = false;
     uint8_t drawMousePosTime = false;
+    uint8_t darkenOutsideExport = true;
 
     bool autoZoneStats = false;
+
+    uint8_t drawHwCounter = true;
+    uint8_t hwCounterYAxisSameScale = true;
+    EHwCounterDrawMode hwCounterDrawMode = EHwCounterDrawMode::BarGraph_Count;
+    uint32_t hwCounterRateTarget = 100;   //  target # / microsecond
 };
 
 

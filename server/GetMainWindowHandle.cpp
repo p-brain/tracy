@@ -4,6 +4,8 @@
 //==================================================================================================
 #include "GetMainWindowHandle.h"
 
+#if defined(_WIN32)
+
 struct handle_data
 {
     unsigned long process_id;
@@ -35,3 +37,5 @@ HWND find_main_window( unsigned long process_id )
     EnumWindows( enum_windows_callback, (LPARAM)&data );
     return data.window_handle;
 }
+
+#endif // if defined(_WIN32)

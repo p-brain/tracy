@@ -17,8 +17,10 @@ extern double s_time;
 #ifndef TRACY_NO_STATISTICS
 void View::FindZones()
 {
-    m_findZone.match = m_worker.GetMatchingSourceLocation( m_findZone.pattern, m_findZone.ignoreCase );
-    if( m_findZone.match.empty() ) return;
+	// Original source-location-only implementation
+    //m_findZone.match = m_worker.GetMatchingSourceLocation( m_findZone.pattern, m_findZone.ignoreCase );
+    m_findZone.match = m_worker.GetMatchingZonePattern( m_findZone.pattern, m_findZone.ignoreCase );
+	if( m_findZone.match.empty() ) return;
 
     auto it = m_findZone.match.begin();
     while( it != m_findZone.match.end() )
@@ -417,7 +419,7 @@ void View::DrawFindZone()
         auto& zoneData = m_worker.GetZonesForSourceLocation( m_findZone.match[m_findZone.selMatch] );
         auto& zones = zoneData.zones;
         zones.ensure_sorted();
-        if( ImGui::TreeNodeEx( "Histogram", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if( ImGui::TreeNodeEx( "Histogram", ImGuiTreeNodeFlags_None ) )
         {
             const auto ty = ImGui::GetTextLineHeight();
 
@@ -1643,6 +1645,21 @@ void View::DrawFindZone()
                 continue;
             }
 
+            // filter by zone name, IF we are also grouping by zone name
+            if( m_findZone.groupBy == FindZone::GroupBy::ZoneName )
+            {
+                if( m_worker.HasZoneExtra( *ev.Zone() ) && m_worker.GetZoneExtra( *ev.Zone() ).text.Active() )
+                {
+                    auto text = m_worker.GetString( m_worker.GetZoneExtra( *ev.Zone() ).name );
+                    if( !strstr_nocase( text, m_findZone.pattern ) )
+                    {
+                        m_filteredZones.insert( &ev );
+                        zptr++;
+                        continue;
+                    }
+                }
+            }
+
             if( m_userTextFilter.IsActive() )
             {
                 bool keep = false;
@@ -1985,6 +2002,15 @@ void View::DrawFindZone()
                     assert( false );
                     break;
                 }
+         
+                if( m_findZone.groupBy == FindZone::GroupBy::ZoneName )
+                {
+                    if( !strstr_nocase( hdrString, m_findZone.pattern ) )
+                    {
+                        continue;
+                    }
+                }
+
                 ImGui::PushID( v->first );
                 const bool expand = ImGui::TreeNodeEx( hdrString, ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ( v->first == m_findZone.selGroup ? ImGuiTreeNodeFlags_Selected : 0 ) );
                 if( ImGui::IsItemClicked() )

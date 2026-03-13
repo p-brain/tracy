@@ -74,6 +74,41 @@ void TimelineItem::Draw( bool firstFrame, const TimelineContext& ctx, int yOffse
     const auto hdrOffset = yBegin;
     const bool drawHeader = yPos + labelSize.y >= ctx.yMin && yPos <= ctx.yMax;
 
+    const ViewData& vd = m_view.GetViewData();
+    if ( vd.darkenOutsideExport )
+    {
+        // NOTE: if we have an export range, darken the areas that are outside said range
+        int64_t exportStart = 0;
+        int64_t exportEnd = 0;
+        if ( m_worker.GetExportRange( exportStart, exportEnd ) )
+        {
+            const int64_t beforeStart = std::min( exportStart, vd.zvStart );
+            const int64_t beforeEnd = std::max( exportStart, vd.zvStart );
+
+            const ImVec2 beforeMin( ctx.wpos.x + ( beforeStart - vd.zvStart ) * ctx.pxns, ctx.wpos.y + yBegin );
+            const ImVec2 beforeMax( ctx.wpos.x + ( beforeEnd - vd.zvStart ) * ctx.pxns, ctx.wpos.y + yEnd );
+
+            const int64_t afterStart = std::min( exportEnd, vd.zvEnd );
+            const int64_t afterEnd = std::max( exportEnd, vd.zvEnd );
+
+            const ImVec2 afterMin( ctx.wpos.x + ( afterStart - vd.zvStart ) * ctx.pxns, ctx.wpos.y + yBegin );
+            const ImVec2 afterMax( ctx.wpos.x + ( afterEnd - vd.zvStart ) * ctx.pxns, ctx.wpos.y + yEnd );
+
+            auto draw = ImGui::GetWindowDrawList();
+            draw->AddRectFilled( beforeMin, beforeMax, 0x55000000 );
+            draw->AddRectFilled( afterMin, afterMax, 0x55000000 );
+
+            if ( ImGui::IsMouseHoveringRect( beforeMin, beforeMax ) || ImGui::IsMouseHoveringRect( afterMin, afterMax ) )
+            {
+                if ( ImGui::BeginTooltip() )
+                {
+                    ImGui::Text( "Area ouside the exported range.\nZones may be incomplete!" );
+                    ImGui::EndTooltip();
+                }
+            }
+        }
+    }
+
     if( drawHeader )
     {
         const auto color = HeaderColor();

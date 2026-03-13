@@ -2,6 +2,7 @@
 #define __TRACYTIMELINEITEMCORE_HPP__
 
 #include "TracyTimelineItem.hpp"
+#include "TracyTimelineDraw.hpp"
 #include "TracyView.hpp"
 #include "TracyViewData.hpp"
 #include "TracyCpuZoneBuffer.hpp"
@@ -48,9 +49,9 @@ protected:
 private:
     struct CoreInfo
     {
-        uint32_t package;
-        uint32_t core;
-        uint32_t coreIndex;
+        CpuPackageId package;
+        CpuCoreId core;
+        CpuThreadId cpuThread;
         const CpuData *cpuData;
     };
 
@@ -58,12 +59,17 @@ private:
 
     int PreprocessZones( const TimelineContext& ctx, const Vector<ContextSwitchCpu> &cslist, const CpuZoneRange &zoneRange, TimelinePreprocessor& preproc, bool visible );
     void PreprocessCpuCtxSwitches( const TimelineContext& ctx, const Vector<ContextSwitchCpu> &cslist, const ContextSwitchCpuRange &ctxRange );
+    void PreprocessHwCounter( const TimelineContext &ctx, const Vector<ContextSwitchCpu> &cslist, const ContextSwitchCpuRange &ctxRange );
+
+    // Find the next 'ContextSwitchCpu' for the current process. Returns endId if not found.
+    const ContextSwitchCpu *FindFirstLocalCtxSwitch( const ContextSwitchCpu *beginIt, const ContextSwitchCpu *endIt );
 
     CoreInfo m_coreInfo;
     std::string m_Name;
 
     std::vector<TimelineDraw> m_draw;
     std::vector<ContextSwitchDraw> m_ctxDraw;
+    HwCounterDraw m_hwCounterDraw;
     int m_maxDepth;
     int m_depth;
 

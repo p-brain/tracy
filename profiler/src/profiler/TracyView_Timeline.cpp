@@ -240,8 +240,6 @@ void View::HandleTimelineKeyboard( int64_t timespan, const ImVec2& wpos, float w
 
 void View::DrawTimeline()
 {
-    SyncViewSettings( m_vd, m_worker );
-
     m_msgHighlight.Decay( nullptr );
     m_zoneSrcLocHighlight.Decay( 0 );
     m_lockHoverHighlight.Decay( InvalidId );
@@ -256,6 +254,7 @@ void View::DrawTimeline()
     m_memInfo.range.StartFrame();
     m_yDelta = 0;
     m_nextLockHighlight = { -1 };
+    ResetHwCounterMaxValues();
 
     if( m_vd.zvStart == m_vd.zvEnd ) return;
     assert( m_vd.zvStart < m_vd.zvEnd );
@@ -456,9 +455,9 @@ void View::DrawTimeline()
         }
         else
         {
-        for( const auto& v : m_threadOrder )
-        {
-            m_tc.AddItem<TimelineItemThread>( v );
+            for( const auto& v : m_threadOrder )
+            {
+                m_tc.AddItem<TimelineItemThread>( v );
 
                 const bool visible = m_vd.threads[ v->id ].visible;
                 TimelineItem& ti = m_tc.GetItem( v );
@@ -636,6 +635,20 @@ void View::DrawTimeline()
         draw->AddRectFilled( ImVec2( wpos.x + ( s - m_vd.zvStart ) * pxns, linepos.y ), ImVec2( wpos.x + ( e - m_vd.zvStart ) * pxns, linepos.y + lineh ), 0x1688DD88 );
         draw->AddRect( ImVec2( wpos.x + ( s - m_vd.zvStart ) * pxns, linepos.y ), ImVec2( wpos.x + ( e - m_vd.zvStart ) * pxns, linepos.y + lineh ), 0x2C88DD88 );
     }
+}
+
+void View::ResetHwCounterMaxValues()
+{
+    m_hwCounterMaxCount = 1;
+    m_hwCounterMaxRate = 1.0f;
+}
+
+void View::UpdateHwCounterMaxValues( uint64_t maxCount, float maxRate )
+{
+    std::lock_guard<std::mutex> lock( m_hwCounterLock );
+
+    if ( maxCount > m_hwCounterMaxCount ) { m_hwCounterMaxCount = maxCount; }
+    if ( maxRate > m_hwCounterMaxRate ) { m_hwCounterMaxRate = maxRate; }
 }
 
 }

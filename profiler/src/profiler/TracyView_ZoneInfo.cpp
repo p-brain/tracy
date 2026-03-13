@@ -380,8 +380,10 @@ void View::DrawZoneInfoWindow()
             ImGui::SameLine();
             if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
             {
+                #define M_OPEN_IN_VS "..\\..\\..\\thirdparty\\tracy\\profiler\\utils\\openinvs\\openinvs.exe "
+
                 std::string cmd;
-                cmd = cmd + "..\\..\\..\\..\\..\\profiler\\utils\\openinvs\\openinvs.exe " + fileName + " " + std::to_string(srcloc.line);
+                cmd = cmd + M_OPEN_IN_VS + fileName + " " + std::to_string( srcloc.line );
                 system( cmd.c_str() );               
             }
             if( hilite )
@@ -703,8 +705,8 @@ void View::DrawZoneInfoWindow()
                                         else
                                         {
                                             ImGui::Text( "%i " ICON_FA_RIGHT_LONG " %i", cpu0, cpu1 );
-                                            const auto tt0 = m_worker.GetThreadTopology( cpu0 );
-                                            const auto tt1 = m_worker.GetThreadTopology( cpu1 );
+                                            const auto tt0 = m_worker.GetThreadTopology( CpuThreadId{ cpu0 } );
+                                            const auto tt1 = m_worker.GetThreadTopology( CpuThreadId{ cpu1 } );
                                             if( tt0 && tt1 )
                                             {
                                                 if( tt0->package != tt1->package )
@@ -1439,7 +1441,7 @@ void View::DrawGpuInfoWindow()
             if (ImGui::Button( ICON_FA_FILE_CODE " MsVC" ))
             {
                 std::string cmd;
-                cmd = cmd + "..\\..\\..\\..\\..\\profiler\\utils\\openinvs\\openinvs.exe " + fileName + " " + std::to_string(srcloc.line);
+                cmd = cmd + M_OPEN_IN_VS + fileName + " " + std::to_string(srcloc.line);
                 system( cmd.c_str() );
             }
             if( hilite )
@@ -1950,7 +1952,7 @@ void View::CpuZoneRangeTooltip( int64_t start, int64_t end, uint32_t coreIndex, 
         label = "Idle";
     }
 
-    auto tt = m_worker.GetThreadTopology( coreIndex );
+    auto tt = m_worker.GetThreadTopology( CpuThreadId{ coreIndex } );
     ImGui::BeginTooltip();
     TextFocused( "CPU:", RealToString( coreIndex ) );
     if( tt )
@@ -1958,9 +1960,9 @@ void View::CpuZoneRangeTooltip( int64_t start, int64_t end, uint32_t coreIndex, 
         ImGui::SameLine();
         ImGui::Spacing();
         ImGui::SameLine();
-        TextFocused( "Package:", RealToString( tt->package ) );
+        TextFocused( "Package:", RealToString( tt->package.val ) );
         ImGui::SameLine();
-        TextFocused( "Core:", RealToString( tt->core ) );
+        TextFocused( "Core:", RealToString( tt->core.val ) );
     }
     if( local )
     {

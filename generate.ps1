@@ -2,33 +2,44 @@
 param(
     [string]$dest,
     [Switch]$help,
-    [Switch]$keepGenerated
+    [Switch]$compile,
+    [Switch]$keepGenerated,
+    [Switch]$makeAll,
+    [Switch]$profiler,
+    [Switch]$capture,
+    [Switch]$serverapi
 )
 
 
-$cmakeProjects = @("ALL_BUILD", "INSTALL", "PACKAGE", "ZERO_CHECK")
-$externDeps = @( "capstone", "freetype", "glfw", "rapidjson" )
+$cmakeProjects = @("ALL_BUILD", "INSTALL", "PACKAGE", "ZERO_CHECK", "CMakePredefinedTargets")
+$externDeps = @( "capstone", "freetype", "glfw", "rapidjson", "travis_doc", "update_mappings" )
 
 
 function Cmake-GenerateProjects
 {
     param(
-        [string]$src
+        [string]$src,
+        [string]$project
     )
 
-    Write-Host "Generate the project files" -ForegroundColor DarkCyan
+    Write-Host "Generate the project files for '$project'" -ForegroundColor DarkCyan
 
     $cmakeCommandParts = @(
         "cmake",
         "-B $src",
-        "-S profiler",
+        "-S $project",
         "-DCMAKE_CONFIGURATION_TYPES=`"Debug;Release`"",
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=`"MultiThreaded`$<`$<CONFIG:Debug>:Debug>`""
+        "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG=`"false`"",
+        "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=`"false`"",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=`"MultiThreaded`$<`$<CONFIG:Debug>:Debug>`"",
+        "-DCMAKE_SKIP_INSTALL_ALL_DEPENDENCY=`"false`"",
+        "-DCMAKE_SKIP_PACKAGE_ALL_DEPENDENCY=`"false`"",
+        "-DCMAKE_SUPPRESS_REGENERATION=`"true`""
     )
 
     $cmakeCommand = $cmakeCommandParts -join ' '
     Write-Host $cmakeCommand
-    Invoke-Expression $cmakeCommand
+    Invoke-Expression $cmakeCommand | Out-Null
 
     $result = [bool]($LastExitCode -eq 0)
     if ( $result -eq $false ) {
@@ -45,53 +56,55 @@ function Compile-Dependencies
     param(
         [string]$srcPath
     )
-    Write-Host "Build the external dependencies" -ForegroundColor DarkCyan
-
     $depsPath = Join-Path -Path $srcPath -ChildPath "_deps"
 
-    Push-Location $depsPath
+    if ( Test-Path -Path "$depsPath" -PathType Container ) {
+        Write-Host "Build the external dependencies" -ForegroundColor DarkCyan
 
-    $commonBase = (Get-Item .).FullName
+        Push-Location $depsPath
 
-    $alldirs = Get-ChildItem -Path "." -Directory
-    $dirs = $alldirs
-    $buildDirs = Get-ChildItem -Path "." -Directory | Where-Object { $_.Name.EndsWith('-build')}
+        $commonBase = (Get-Item .).FullName
 
-    $depProjectFiles = @()
+        $alldirs = Get-ChildItem -Path "." -Directory
+        $dirs = $alldirs
+        $buildDirs = Get-ChildItem -Path "." -Directory | Where-Object { $_.Name.EndsWith('-build')}
 
-    foreach ( $bd in $buildDirs ) {
-        $checkDirs = Get-ChildItem -Path $bd -Directory -Recurse
+        $depProjectFiles = @()
 
-        $depProj = $bd.Name.TrimEnd("-build")
-        $depProjFile = [io.path]::ChangeExtension( $depProj, "vcxproj" )
-        $checkPath = Join-Path -Path $bd.FullName -ChildPath $depProjFile
+        foreach ( $bd in $buildDirs ) {
+            $checkDirs = Get-ChildItem -Path $bd -Directory -Recurse
 
-        if ( Test-Path -Path $checkPath ) {
-            $relPath = $checkPath.Substring( $commonBase.Length ).TrimStart( '\' )
-            $depProjectFiles += $relPath
-        } else {
-            foreach ( $dir in $checkDirs ) {
-                $checkPath = Join-Path -Path $dir.FullName -ChildPath $depProjFile
+            $depProj = $bd.Name.TrimEnd("-build")
+            $depProjFile = [io.path]::ChangeExtension( $depProj, "vcxproj" )
+            $checkPath = Join-Path -Path $bd.FullName -ChildPath $depProjFile
 
-                if ( Test-Path -Path $checkPath ) {
-                    $relPath = $checkPath.Substring( $commonBase.Length ).TrimStart( '\' )
-                    $depProjectFiles += $relPath
+            if ( Test-Path -Path $checkPath ) {
+                $relPath = $checkPath.Substring( $commonBase.Length ).TrimStart( '\' )
+                $depProjectFiles += $relPath
+            } else {
+                foreach ( $dir in $checkDirs ) {
+                    $checkPath = Join-Path -Path $dir.FullName -ChildPath $depProjFile
+
+                    if ( Test-Path -Path $checkPath ) {
+                        $relPath = $checkPath.Substring( $commonBase.Length ).TrimStart( '\' )
+                        $depProjectFiles += $relPath
+                    }
                 }
             }
         }
-    }
 
-    foreach ( $dep in $depProjectFiles ) {
-        $relPath = (Get-Item $dep).DirectoryName
-        $file = (Get-Item $dep).Name
-        Push-Location "$relPath"
-        & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Release;Configuration=Debug' '/t:Rebuild' $file
-        & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Release;Configuration=Release' '/t:Rebuild' $file
+        foreach ( $dep in $depProjectFiles ) {
+            $relPath = (Get-Item $dep).DirectoryName
+            $slnFile = (Get-Item $dep).Name
+            Push-Location "$relPath"
+            & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Debug' '/t:Rebuild' $slnFile
+            & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Release' '/t:Rebuild' $slnFile
+            Pop-Location
+        }
         Pop-Location
-    }
-    Pop-Location
 
-    Write-Host ""
+        Write-Host ""
+    }
 }
 
 
@@ -104,7 +117,7 @@ function Prep-Dependency()
     )
 
     if ( $srcPath -eq $dstPath ) {
-        Write-Host "Prep-Dependency: source and dest are the same, nothing to do" -ForegroundColor DarkYellow
+        Write-Host "Prep-Dependency: source and dest are the same, nothing to do" -ForegroundColor Yellow
         return
     }
 
@@ -163,17 +176,19 @@ function Copy-Dependencies
         [string]$dstPath
     )
 
-    Write-Host "Copy external includes and libs $srcPath -> $dstPath" -ForegroundColor DarkCyan
+    if ( Test-Path -Path "$srcPath" -PathType Container ) {
+        Write-Host "Copy external includes and libs $srcPath -> $dstPath" -ForegroundColor DarkCyan
 
-    if ( -Not (Test-Path -Path "$dstPath" -PathType Container) ) {
-        New-Item -Path "$dstPath" -ItemType Directory -Force | Out-Null
+        if ( -Not (Test-Path -Path "$dstPath" -PathType Container) ) {
+            New-Item -Path "$dstPath" -ItemType Directory -Force | Out-Null
+        }
+
+        foreach ( $proj in $externDeps ) {
+            Prep-Dependency $proj $srcPath $dstPath
+        }
+
+        Write-Host ""
     }
-
-    foreach ( $proj in $externDeps ) {
-        Prep-Dependency $proj $srcPath $dstPath
-    }
-
-    Write-Host ""
 }
 
 
@@ -243,6 +258,8 @@ function Rewrite-Projects
     param(
         [string]$srcPath,
         [string]$dstPath,
+        [string]$binDst,
+        [string]$exeName,
         [string]$extFilter,
         [string]$intDir
     )
@@ -265,7 +282,8 @@ function Rewrite-Projects
         if ( -Not ( $cmakeProjects -contains $base ) ) {
             $intputFile = $_.FullName
             $inputName = $_.Name
-            $outputFile = Join-Path -Path $PSScriptRoot -ChildPath (Join-Path -Path $dstPath -ChildPath $_.Name)
+            $outputPath = Join-Path -Path $PSScriptRoot -ChildPath $dstPath
+            $outputFile = Join-Path -Path $outputPath -ChildPath $_.Name
 
             $content = Get-Content -Path $intputFile
 
@@ -312,7 +330,20 @@ function Rewrite-Projects
             $cfgTypeNodes = Get-MatchingNodes -xml $xml -nsManager $nsManager -xpath "/ns:Project/ns:PropertyGroup/ns:ConfigurationType"
             if ( $cfgTypeNodes -and $cfgTypeNodes.Count -gt 0 ) {
                 $cfg = $cfgTypeNodes[0]
-                if ($cfg -is [System.Xml.XmlNode] -and $cfg.InnerXml -eq 'Application') {
+
+                $isAppProj = ($cfg -is [System.Xml.XmlNode] -and $cfg.InnerXml -eq 'Application')
+                $rewrite = $true
+                if ( $rewrite -eq $true ) {
+                    Write-Host "Rewriting $_"
+                    if ( $isAppProj -and -not [string]::IsNullOrEmpty( $exeName ) ) {
+                        $intNodes = Get-MatchingNodes -xml $xml -nsManager $nsManager -xpath "/ns:Project/ns:PropertyGroup/ns:TargetName" -attr 'Condition' -filters "Release"
+                        foreach ( $node in $intNodes ) {
+                            if ( $node -is [System.Xml.XmlNode] ) {
+                                $node.InnerXml = $exeName
+                            }
+                        }
+                    }
+
                     $itemDefGroupNodes = Get-MatchingNodes -xml $xml -nsManager $nsManager -xpath "/ns:Project/ns:ItemDefinitionGroup"
                     foreach( $itemDefGroup in $itemDefGroupNodes ) {
                         $cond = $itemDefGroup.GetAttribute( "Condition" )
@@ -330,40 +361,63 @@ function Rewrite-Projects
                                 $xmlCompile.AppendChild( $xmlDbgInfoFormat ) | Out-Null
                             }
 
-                            $xmlLink = $itemDefGroup.SelectSingleNode( "ns:Link", $nsManager )
-                            if ( $xmlLink -ne $null ) {
-                                $xmlGenDbg = $xmlLink.SelectSingleNode( "ns:GenerateDebugInformation", $nsManager )
-                                if ( $xmlGenDbg -ne $null ) {
-                                    $xmlGenDbg.ParentNode.RemoveChild($xmlGenDbg) | Out-Null
+                            if ( $isAppProj -eq $true ) {
+                                $xmlLink = $itemDefGroup.SelectSingleNode( "ns:Link", $nsManager )
+                                if ( $xmlLink -ne $null ) {
+                                    $xmlGenDbg = $xmlLink.SelectSingleNode( "ns:GenerateDebugInformation", $nsManager )
+                                    if ( $xmlGenDbg -ne $null ) {
+                                        $xmlGenDbg.ParentNode.RemoveChild($xmlGenDbg) | Out-Null
+                                    }
+
+                                    $xmlGenDbg = $xml.CreateElement( "GenerateDebugInformation", $nsUri )
+                                    $xmlGenDbg.InnerXml = "true"
+                                    $xmlLink.AppendChild( $xmlGenDbg ) | Out-Null
+
+                                    $xmlPdb = $xmlLink.SelectSingleNode( "ns:ProgramDataBaseFile", $nsManager )
+                                    $xmlPdb.InnerXml = "`$(OutDir)`$(TargetName).pdb"
                                 }
 
-                                $xmlGenDbg = $xml.CreateElement( "GenerateDebugInformation", $nsUri )
-                                $xmlGenDbg.InnerXml = "true"
-                                $xmlLink.AppendChild( $xmlGenDbg ) | Out-Null
+                                $xmlPostChild = $itemDefGroup.SelectSingleNode( "ns:PostBuildEvent", $nsManager )
+                                if ( $xmlPostChild -ne $null ) {
+                                    $xmlPostChild.ParentNode.RemoveChild($xmlPostChild) | Out-Null
+                                }
+
+                                $dstExecutablePath = "`$(ProjectDir)\$binDst"
+
+                                $dstName = "`$(TargetName)"
+                                $chkPath = "$dstExecutablePath\$dstName.*"
+                                $borderLen = "**  **".Length
+                                $outputLen = ("Make sure `"$chkPath`" is writable." | Measure-Object -Property Length -Maximum).Maximum + $borderLen
+                                $linefailed = "Failed to copy output to destination."
+
+                                $copyCmd = ""
+                                $copyCmd += "`n"
+                                $copyCmd += "setlocal`n"
+                                $copyCmd += "echo.`n"
+                                $copyCmd += "echo Copying build results to destination.`n"
+                                $copyCmd += "echo.`n"
+                                $copyCmd += "copy `"`$(OutDir)`$(TargetName).*`" `"$dstExecutablePath\$dstName.*`"`n"
+                                $copyCmd += "echo.`n"
+                                $copyCmd += "if ERRORLEVEL 1 (`n"
+                                $copyCmd += "    echo FAILED`n"
+                                $copyCmd += "    echo " + ("*" * $outputLen) + "`n"
+                                $copyCmd += "    echo ** $linefailed" + (' ' * ($outputLen - $linefailed.Length - $borderLen)) + " **`n"
+                                $copyCmd += "    echo ** Make sure `"$dstExecutablePath\$dstName.*`" is writable. **`n"
+                                $copyCmd += "    echo " + ("*" * $outputLen) + "`n"
+                                $copyCmd += ") else (`n"
+                                $copyCmd += "    echo Succeeded`n"
+                                $copyCmd += ")`n"
+                                $copyCmd += "echo.`n"
+                                $copyCmd += "endlocal`n"
+                                $copyCmd += "exit /b 0`n"
+
+                                $xmlPostChild = $xml.CreateElement( "PostBuildEvent", $nsUri )
+                                $xmlCommandChild = $xml.CreateElement( "Command", $nsUri )
+                                $xmlCommandChild.InnerXml = $copyCmd
+                                $xmlPostChild.AppendChild( $xmlCommandChild ) | Out-Null
+                                $itemDefGroup.AppendChild( $xmlPostChild ) | Out-Null
                             }
 
-                            $xmlPostChild = $itemDefGroup.SelectSingleNode( "ns:PostBuildEvent", $nsManager )
-                            if ( $xmlPostChild -ne $null ) {
-                                $xmlPostChild.ParentNode.RemoveChild($xmlPostChild) | Out-Null
-                            }
-
-                            $dstExecutablePath = "`$(SolutionDir)x64\Release"
-                            $copyCmd = ""
-                            $copyCmd += "`n"
-                            $copyCmd += "setlocal"
-                            $copyCmd += "`n"
-                            $copyCmd += "if not exist `"$dstExecutablePath\`" (mkdir `"$dstExecutablePath`")"
-                            $copyCmd += "`n"
-                            $copyCmd += "copy `"`$(OutDir)`$(TargetName).*`" `"$dstExecutablePath\Tracy.*`""
-                            $copyCmd += "`n"
-                            $copyCmd += "endlocal"
-                            $copyCmd += "`n"
-
-                            $xmlPostChild = $xml.CreateElement( "PostBuildEvent", $nsUri )
-                            $xmlCommandChild = $xml.CreateElement( "Command", $nsUri )
-                            $xmlCommandChild.InnerXml = $copyCmd
-                            $xmlPostChild.AppendChild( $xmlCommandChild ) | Out-Null
-                            $itemDefGroup.AppendChild( $xmlPostChild ) | Out-Null
                             break
                         }
                     }
@@ -380,7 +434,9 @@ function Copy-Projects
 {
     param(
         [string]$srcPath,
-        [string]$dstPath
+        [string]$dstPath,
+        [string]$binDst,
+        [string]$exeName
     )
 
     Write-Host "Copy tracy projects and solution" -ForegroundColor DarkCyan
@@ -396,14 +452,115 @@ function Copy-Projects
         Remove-Item -Path "$intPath" -Recurse -Force | Out-Null
     }
 
-    Rewrite-Projects "$srcPath" "$dstPath" "*.vcxproj" $intDir
-    Rewrite-Projects "$srcPath" "$dstPath" "*.vcxproj.filters"
+    Rewrite-Projects "$srcPath" "$dstPath" "$binDst" "$exeName" "*.vcxproj" "$intDir"
+    Rewrite-Projects "$srcPath" "$dstPath" "$binDst" "$exeName" "*.vcxproj.filters"
 
-    Get-ChildItem "$srcPath" -Filter "*.sln" | 
+    Get-ChildItem "$srcPath" -Filter "*.sln" |
     Foreach-Object {
         $intputFile = $_.FullName
         $outputFile = Join-Path -Path "$dstPath" -ChildPath $_.Name
         Copy-Item -Path "$intputFile" -Destination "$outputFile" -Force
+
+        $removedProjects = $( $cmakeProjects; $externDeps )
+        $prjGuids = @()
+        $prjNames = @()
+
+        [string[]]$slnContent = Get-Content -Path "$outputFile"
+        for ($i = 0; $i -lt $slnContent.Count; $i++) {
+            $prjLine = $slnContent[ $i ]
+            if ( $prjLine.StartsWith( "Project" ) ) {
+                $excludePrj = $false
+
+                foreach( $name in $removedProjects ) {
+                    if ( $prjLine.ToUpper().Contains($name.ToUpper()) ) {
+                        $excludePrj = $true
+                        $prjParts = ( $prjLine -split "," )
+                        if ( $prjParts.Count -ge 3 ) {
+                            $name = (($prjParts[ 0 ] -split "=")[1]).Trim().Trim("`"")
+                            $guid = $prjParts[ 2 ].Trim().Trim("`"").ToUpper()
+                            if ( -not ( $prjGuids -contains $guid ) ) {
+                                $prjGuids += $guid
+                                $prjNames += $name
+                            }
+                        }
+                    }
+                }
+
+                for ( ; $i -lt $slnContent.Count; $i++) {
+                    $prjLine = $slnContent[ $i ]
+                    if ( $prjLine.EndsWith( "EndProject" ) ) {
+                        break
+                    }
+                }
+            }
+        }
+
+        Write-Host "Removing"$prjGuids.Count"GUIDs from solution"
+        for ($i = 0; $i -lt $prjGuids.Count; $i++) {
+            $guid = $prjGuids[ $i ]
+            $name = $prjNames[ $i ]
+            Write-Host "$guid $name"
+        }
+        Write-Host ""
+
+        $slnRewritten = @()
+        for ($i = 0; $i -lt $slnContent.Count; $i++) {
+            $prjLine = $slnContent[ $i ]
+            if ( $prjLine.StartsWith( "Project" ) ) {
+                $excludePrj = $false
+
+                foreach( $guid in $prjGuids ) {
+                    if ( $prjLine.ToUpper().Contains($guid) ) {
+                        $excludePrj = $true
+                    }
+                }
+
+                for ( ; $i -lt $slnContent.Count; $i++) {
+                    $prjLine = $slnContent[ $i ]
+                    $excludeLine = $false
+
+                    foreach( $guid in $prjGuids ) {
+                        if ( $prjLine.ToUpper().Contains($guid) ) {
+                            $excludeLine = $true
+                        }
+                    }
+
+                    if ( -not $excludePrj -and -not $excludeLine ) {
+                        $slnRewritten += $prjLine
+                    }
+
+                    if ( $prjLine.EndsWith( "EndProject" ) ) {
+                        break
+                    }
+                }
+            } elseif ( $prjLine.StartsWith( "Global" ) ) {
+                for ( ; $i -lt $slnContent.Count; $i++) {
+                    $excludePrj = $false
+                    $prjLine = $slnContent[ $i ]
+
+                    foreach( $guid in $prjGuids ) {
+                        if ( $prjLine.ToUpper().Contains($guid) ) {
+                            $excludePrj = $true
+                        }
+                    }
+
+                    if ( -not $excludePrj ) {
+                        $slnRewritten += $prjLine
+                    }
+
+                    if ( $prjLine.EndsWith( "EndGlobal" ) ) {
+                        break
+                    }
+                }
+            } else {
+                $slnRewritten += $prjLine
+            }
+        }
+
+        Copy-Item -Path "$outputFile" -Destination "$outputFile.bak" -Force
+
+        $slnRewritten = $slnRewritten -join "`n"
+        $slnRewritten | Out-File -Encoding "UTF8" "$outputFile"
     }
 
     Write-Host ""
@@ -427,33 +584,269 @@ function Disable-DirectoryBuildProps
 }
 
 
-function Print-PostGenerateMessage
+function Make-TracyProject
 {
-    $msg = @(
-        "IMPORTANT:",
-        "  - you must remove the cmake and external projects from the solution!"
+    param(
+        [string]$projectName,
+        [string]$binDstRel,
+        [string]$exeName
     )
 
-    $borderLen = "**  **".Length
-    $outputLen = ($msg | Measure-Object -Property Length -Maximum).Maximum + $borderLen
     Write-Host ""
-    Write-Host ""
-    Write-Host ("*" * $outputLen) -ForegroundColor DarkCyan
-    foreach ( $line in $msg ) {
-        $spaces = 
-        Write-Host "** "  -ForegroundColor DarkCyan -NoNewline
-        Write-Host "$line" -NoNewline
-        Write-Host (' ' * ($outputLen - $line.Length - $borderLen)) -NoNewline
-        Write-Host " **" -ForegroundColor DarkCyan
+    Write-Host "Generating '$projectName'" -ForegroundColor Magenta
+    Write-Host "Resulting binaries will be copied to '$binDstRel'"
+
+    $projectDirAbs = Join-Path -Path "$PSScriptRoot" -ChildPath $projectName
+    $source = "$projectName\build\_generated"
+
+    $projectDst = $dest
+    if ( [string]::IsNullOrEmpty( $projectDst ) ) {
+        $projectDst = "$projectName\build\win32"
     }
-    Write-Host ("*" * $outputLen) -ForegroundColor DarkCyan
+    $destDirAbs = Join-Path -Path $PSScriptRoot -ChildPath $projectDst
+    if ( -Not ( Test-Path -Path "$destDirAbs" -PathType Container ) ) {
+        New-Item -Path "$destDirAbs" -ItemType Directory -Force | Out-Null
+    }
+
+    $binDstAbs = Join-Path -Path "$PSScriptRoot" -ChildPath "$binDstRel"
+    Push-Location $destDirAbs
+    $binDst = Resolve-Path -Path "$binDstAbs" -Relative
+    Pop-Location
+
+    if ( Test-Path -Path "$source" -PathType Container ) {
+        Remove-Item "$source" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if ( Test-Path -Path "$projectDst" -PathType Container ) {
+        Remove-Item "$projectDst" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    New-Item -Path "$projectDst" -ItemType Directory -Force | Out-Null
+
+    $success = $false
+    $cmakeResult = (Cmake-GenerateProjects $source $projectName)
+    if ( $cmakeResult -eq $true ) {
+        Compile-Dependencies $source
+        Copy-Dependencies $source $projectDst
+        Copy-Projects $source $projectDst $binDst $exeName
+
+        if ( -not $keepGenerated ) {
+            Write-Host "Removing generated directory $source" -ForegroundColor Yellow
+            Remove-Item -Path $source -Recurse -Force -erroraction silentlycontinue
+        }
+
+        $slnFiles = Get-ChildItem -Path $destDirAbs -Filter "*.sln"
+        if ( $slnFiles.Length -gt 0 ) {
+            $slnFile = $slnFiles[0]
+            $destSlnAbs = Join-Path -Path $destDirAbs -ChildPath $slnFile
+            Write-Host ""
+            Write-Host "Solution generated in: " -NoNewline
+            Write-Host "'$destSlnAbs'" -ForegroundColor Green
+            Write-Host ""
+
+            if ( $compile -eq $true ) {
+                Push-Location "$destDirAbs"
+                Write-Host "Building $slnFile Debug"
+                & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Debug' '/t:Rebuild' $slnFile
+                Write-Host "Building $slnFile Release"
+                & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Release' '/t:Rebuild' $slnFile
+                Pop-Location
+            }
+        }
+
+        $success = $true
+    }
+
+    Write-Host "Generation of " -NoNewline
+    Write-Host "'$projectName' " -NoNewline -ForegroundColor Magenta
+    if ( $success -eq $true ) {
+        Write-Host "succeeded" -ForegroundColor DarkGreen
+    } else {
+        Write-Host "failed!" -NoNewline -ForegroundColor Red
+    }
+
+    Write-Host ""
+    return $success
 }
 
+
+function ServerapiGen-Header
+{
+    param(
+        [string]$filename,
+        [string]$commonPath,
+        [string]$serverPath
+    )
+
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* ============================================= */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* == This file was generated by generate.ps1 == */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* ==              DO NOT MODIFY              == */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* ============================================= */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#ifndef __TRACY_SERVER_API_HPP__" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#define __TRACY_SERVER_API_HPP__" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#pragma once" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#ifdef TRACY_ENABLE" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#include `"../public/TracyFeatureDefines.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#if defined( TRACY_HAS_SERVER_API_SUPPORT )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma push_macro( `"NOMINMAX`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma push_macro( `"WIN32_LEAN_AND_MEAN`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      if !defined( NOMINMAX )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#          define NOMINMAX" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      endif // if !defined( NOMINMAX )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      if !defined( WIN32_LEAN_AND_MEAN )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#          define WIN32_LEAN_AND_MEAN" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      endif // if !defined( WIN32_LEAN_AND_MEAN )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma warning( push, 1 )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma warning( disable: 5262 )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   endif // if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   define TRACY_OVERRIDE_PROCESS_FORCE_INCLUDES 1" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   define TRACY_NO_CAPSTONE 1" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   define TRACY_NO_EXCEPTIONS 1" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   if !defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#       define NO_PARALLEL_SORT 1" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   endif // if !defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   if TRACY_OVERRIDE_PROCESS_FORCE_INCLUDES" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#       define tracy_force_inline_process" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   endif // if TRACY_OVERRIDE_PROCESS_FORCE_INCLUDES" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    Get-ChildItem "$serverPath" -Filter "*.hpp" | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    Get-ChildItem "$serverPath" -Filter "*.h"   | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma pop_macro( `"NOMINMAX`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma pop_macro( `"WIN32_LEAN_AND_MEAN`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma warning( pop )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   endif // if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#endif // if defined( TRACY_HAS_SERVER_API_SUPPORT )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#endif // ifdef TRACY_ENABLE" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#endif // __TRACY_SERVER_API_HPP__" | Out-File -Encoding ascii -FilePath "$filename" -Append
+}
+
+
+function ServerapiGen-Source
+{
+    param(
+        [string]$filename,
+        [string]$commonPath,
+        [string]$serverPath
+    )
+
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* ============================================= */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* == This file was generated by generate.ps1 == */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* ==              DO NOT MODIFY              == */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "/* ============================================= */" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#ifdef TRACY_ENABLE" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#include `"../public/TracyFeatureDefines.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#if defined( TRACY_HAS_SERVER_API_SUPPORT )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   include `"TracyServerApiGen.hpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma push_macro( `"NOMINMAX`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma push_macro( `"WIN32_LEAN_AND_MEAN`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      if !defined( NOMINMAX )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#          define NOMINMAX" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      endif // if !defined( NOMINMAX )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      if !defined( WIN32_LEAN_AND_MEAN )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#          define WIN32_LEAN_AND_MEAN" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      endif // if !defined( WIN32_LEAN_AND_MEAN )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma warning( push, 1 )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma warning( disable: 5262 )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   endif // if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    $tracyStackFrames = Join-Path -Path "$commonPath" -ChildPath "TracyStackFrames.cpp"
+    $tracyLz4Hc = Join-Path -Path "$commonPath" -ChildPath "tracy_lz4hc.cpp"
+    if ( Test-Path -Path "$tracyStackFrames" ) {
+        "//  IMPORTANT: This must be the opposite condition of the one found in TracyClient.cpp! (If you get link errors check it)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+        "#   if !defined(TRACY_HAS_CALLSTACK) || !(TRACY_HAS_CALLSTACK == 2 || TRACY_HAS_CALLSTACK == 3 || TRACY_HAS_CALLSTACK == 4 || TRACY_HAS_CALLSTACK == 6)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+        "#       include `"../public/common/TracyStackFrames.cpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+        "#   endif" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    }
+
+    if ( Test-Path -Path "$tracyLz4Hc" ) {
+        "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+        "#   include `"../public/common/tracy_lz4hc.cpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    }
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    Get-ChildItem "$serverPath" -Filter "*.cpp" | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    Get-ChildItem "$serverPath" -Filter "*.c"   | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#   if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma pop_macro( `"NOMINMAX`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma pop_macro( `"WIN32_LEAN_AND_MEAN`" )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#      pragma warning( pop )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   endif // if defined(_WIN32)" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#endif // if defined( TRACY_HAS_SERVER_API_SUPPORT )" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "#endif // ifdef TRACY_ENABLE" | Out-File -Encoding ascii -FilePath "$filename" -Append
+}
+
+
 if ( $help ) {
-    Write-Host "Usage: " $MyInvocation.MyCommand.Name " [-dest sln_output_path] [-keepGenerated]" -ForegroundColor DarkCyan
+    Write-Host "Usage: " $MyInvocation.MyCommand.Name " [-dest sln_output_path] [-compile] [-keepGenerated] [-profiler] [-capture] [-serverapi]" -ForegroundColor DarkCyan
     Write-Host "" -ForegroundColor DarkCyan
     Write-Host "  -dest           Output directory of the generated solution/project files (default: profiler/build/win32)" -ForegroundColor DarkCyan
+    Write-Host "  -compile        (Attempts to) Compile the generated solutions in debug and release" -ForegroundColor DarkCyan
     Write-Host "  -keepGenerated  Do not delete the _generated folder" -ForegroundColor DarkCyan
+    Write-Host "  -profiler       Generate the tracy profiler (default: yes)" -ForegroundColor DarkCyan
+    Write-Host "  -capture        Generate the tracy capture program" -ForegroundColor DarkCyan
+
+    Write-Host "  -serverapi      Generate the tracy server api lib" -ForegroundColor DarkCyan
 } else {
     if ((Get-Command "cl.exe" -ErrorAction SilentlyContinue) -eq $null) {
         $defaultVs = 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\Launch-VsDevShell.ps1'
@@ -477,54 +870,61 @@ if ( $help ) {
         Write-Host ""
         Exit 1
     } else {
-        $profilerDir = "profiler"
-        $profilerDirAbs = Join-Path -Path $PSScriptRoot -ChildPath $profilerDir
-        $source = "$profilerDir\build\_generated"
+        $binDstRel = "..\..\devtools\bin\win64"
 
-        if ( [string]::IsNullOrEmpty( $dest ) ) {
-            $dest = "$profilerDir\build\win32"
+        if (-not $profiler -and -not $capture -and -not $serverapi) {
+            $profiler = $true
         }
 
-        if ( Test-Path -Path "$source" -PathType Container ) {
-            Remove-Item "$source" -Recurse -Force -ErrorAction SilentlyContinue
+        if ( $profiler -eq $true ) {
+            $serverapi = $true
         }
 
-        if ( Test-Path -Path "$dest" -PathType Container ) {
-            Remove-Item "$dest" -Recurse -Force -ErrorAction SilentlyContinue
-        }
-
-        New-Item -Path "$dest" -ItemType Directory -Force | Out-Null
+        $profilerSuccess = $true
+        $captureSuccess = $true
 
         # Make sure we ignore any Directory.Build.props file higher up in the directory structure
-        Disable-DirectoryBuildProps $profilerDirAbs
+        Disable-DirectoryBuildProps $PSScriptRoot
 
-        $cmakeResult = (Cmake-GenerateProjects $source)
-        if ( $cmakeResult -eq $true ) {
-            Compile-Dependencies $source
-            Copy-Dependencies $source $dest
-            Copy-Projects $source $dest
+        if ( $profiler ) {
+            $profilerSuccess = Make-TracyProject "profiler" "$binDstRel" -exeName "Tracy"
+        }
 
-            if ( -not $keepGenerated ) {
-                Write-Host "Removing generated directory $source" -ForegroundColor DarkYellow
-                Remove-Item -Path $source -Recurse -Force -erroraction silentlycontinue
+        if ( $capture -or $makeAll ) {
+            $captureSuccess = Make-TracyProject "capture" "capture"
+        }
+
+        if ( $serverapi -or $makeAll ) {
+            $apiCpp = Join-Path -Path "$PSScriptRoot" -ChildPath "serverapi/TracyServerApiGen.cpp"
+            $apiHpp = Join-Path -Path "$PSScriptRoot" -ChildPath "serverapi/TracyServerApiGen.hpp"
+
+            if ( Test-Path -Path "$apiCpp" -PathType Leaf ) {
+                Remove-Item -Path "$apiCpp" -Force | Out-Null
             }
 
-            Print-PostGenerateMessage
-
-            $destDirAbs = Join-Path -Path $PSScriptRoot -ChildPath $dest
-            $slnFiles = Get-ChildItem -Path $destDirAbs -Filter "*.sln"
-            if ( $slnFiles.Length -gt 0 ) {
-                $slnFile = $slnFiles[0]
-                $destSlnAbs = Join-Path -Path $destDirAbs -ChildPath $slnFile
-                Write-Host ""
-                Write-Host "Solution generated in: " -NoNewline
-                Write-Host "'$destSlnAbs'" -ForegroundColor Green
-                Write-Host ""
+            if ( Test-Path -Path "$apiHpp" -PathType Leaf ) {
+                Remove-Item -Path "$apiHpp" -Force | Out-Null
             }
-            Write-Host "Press any key to quit..." -ForegroundColor DarkGreen
-        } else {
-            Write-Host "Projects have not been created!" -ForegroundColor Red
+
+            $commonPath = Join-Path -Path "$PSScriptRoot" -ChildPath "public/common"
+            $serverPath = Join-Path -Path "$PSScriptRoot" -ChildPath "server"
+
+            ServerapiGen-Header $apiHpp $commonPath $serverPath
+            ServerapiGen-Source $apiCpp $commonPath $serverPath
+        }
+
+        if ( -not $profilerSuccess ) {
+            Write-Host "Generating 'profiler' failed" -ForegroundColor Red
+        }
+
+        if ( -not $captureSuccess ) {
+            Write-Host "Generating 'capture' failed" -ForegroundColor Red
+        }
+
+        if ( $profSuccess -and $captSuccess -and $serverapi ) {
             Write-Host "Press any key to quit..." -ForegroundColor Red
+        } else {
+            Write-Host "Press any key to quit..." -ForegroundColor DarkGreen
         }
 
         cmd /c pause | out-null

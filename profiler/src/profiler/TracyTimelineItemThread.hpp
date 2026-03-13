@@ -44,6 +44,7 @@ private:
 #endif
 
     void PreprocessContextSwitches( const TimelineContext& ctx, const ContextSwitch& ctxSwitch, bool visible );
+    void PreprocessHwCounter( const TimelineContext &ctx, const ContextSwitch &ctxSwitch, const CpuData *pCpuData, int cpuDataCount, bool visible );
     void PreprocessSamples( const TimelineContext& ctx, const Vector<SampleData>& vec, bool visible, int yPos );
     void PreprocessMessages( const TimelineContext& ctx, const Vector<short_ptr<MessageData>>& vec, uint64_t tid, bool visible, int yPos );
     void PreprocessLocks( const TimelineContext &ctx, const unordered_flat_set<uint32_t> &lockIds, const unordered_flat_map<uint32_t, LockMap *> &locks, uint32_t tid, TaskDispatch &td, bool visible );
@@ -66,6 +67,7 @@ private:
 
     std::vector<SamplesDraw> m_samplesDraw;
     std::vector<ContextSwitchDraw> m_ctxDraw;
+    HwCounterDraw m_hwCounterDraw;
     std::vector<TimelineDraw> m_draw;
     std::vector<MessagesDraw> m_msgDraw;
     std::vector<std::unique_ptr<LockDraw>> m_lockDraw;
@@ -82,6 +84,7 @@ private:
     bool m_hasCtxSwitch;
     bool m_hasSamples;
     bool m_hasMessages;
+    bool m_hasHwCounter;
 
     TrackUiData m_trackUiData;
 };

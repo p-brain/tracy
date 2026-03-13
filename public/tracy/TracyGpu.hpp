@@ -71,6 +71,10 @@ namespace tracy
             MemWrite( &item->gpuNewContext.flags, flags );
             MemWrite( &item->gpuNewContext.type, GpuContextType::GPUS2 );
 
+#ifdef TRACY_ON_DEMAND
+            GetProfiler().DeferItem( *item );
+#endif
+
             Profiler::QueueSerialFinish();
         }
 
@@ -88,6 +92,10 @@ namespace tracy
             MemWrite( &item->gpuContextNameFat.context, m_context );
             MemWrite( &item->gpuContextNameFat.ptr, ( uint64_t ) ptr );
             MemWrite( &item->gpuContextNameFat.size, len );
+
+#ifdef TRACY_ON_DEMAND
+            GetProfiler().DeferItem( *item );
+#endif
 
             Profiler::QueueSerialFinish();
         }
@@ -135,10 +143,13 @@ extern tracy::GPUS2Ctx *g_tracyCtx;
 
 tracy_force_inline void TracyGPUS2StartQuery( SceneViewTimestampQuery_t *pTimestampQuery, uint32_t line, const char *source, size_t sourceSz, const char *function, size_t functionSz, const char *name, size_t nameSz )
 {
+    tracy::Profiler& p = tracy::GetProfiler();
+
 #ifdef TRACY_ON_DEMAND
-    if ( !tracy::GetProfiler().IsConnected() || !g_tracyCtx )
+    if ( !p.IsConnected() || !g_tracyCtx )
     {
         pTimestampQuery->m_nTracyStartQueryId = 0xFFFF;
+        pTimestampQuery->m_nTracyConnectionId = 0;
         return;
     }
 #endif
@@ -155,7 +166,8 @@ tracy_force_inline void TracyGPUS2StartQuery( SceneViewTimestampQuery_t *pTimest
     tracy::MemWrite( &item->gpuZoneBegin.context, g_tracyCtx->GetId() );
 
     pTimestampQuery->m_nTracyStartQueryId = queryId;
-    pTimestampQuery->m_nTracyFrameStartTime = tracy::GetProfiler().m_frameTime;
+    pTimestampQuery->m_nTracyFrameStartTime = p.GetFrameTime();
+    pTimestampQuery->m_nTracyConnectionId = p.ConnectionId();
 
     tracy::Profiler::QueueSerialFinish();
 
@@ -164,9 +176,10 @@ tracy_force_inline void TracyGPUS2StartQuery( SceneViewTimestampQuery_t *pTimest
 
 tracy_force_inline void TracyGPUS2EndQuery( SceneViewTimestampQuery_t *pTimestampQuery )
 {
-    if ( !tracy::GetProfiler().IsConnected() || !g_tracyCtx )
+    if ( !tracy::GetProfiler().IsConnectedTo( pTimestampQuery->m_nTracyConnectionId ) || !g_tracyCtx )
     {
         pTimestampQuery->m_nTracyStartQueryId = 0xFFFF;
+        pTimestampQuery->m_nTracyConnectionId = 0;
         return;
     }
 
@@ -184,11 +197,10 @@ tracy_force_inline void TracyGPUS2EndQuery( SceneViewTimestampQuery_t *pTimestam
     tracy::Profiler::QueueSerialFinish();
 }
 
-tracy_force_inline void TracyGPUS2CollectQuery( uint16_t queryId, int64_t time )
+tracy_force_inline void TracyGPUS2CollectQuery( uint32_t nConnId, uint16_t queryId, int64_t time )
 {
 #ifdef TRACY_ON_DEMAND
-
-    if ( ( !tracy::GetProfiler().IsConnected() ) || queryId == 0xFFFF || !g_tracyCtx )
+    if ( queryId == 0xFFFF || !g_tracyCtx || !tracy::GetProfiler().IsConnectedTo( nConnId ) )
     {
         return;
     }

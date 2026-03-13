@@ -117,7 +117,7 @@ static void LoadCommonJson( const rapidjson::Value& v, ViewDataCommon& data )
     ReadJsonValue( v, ghostZones, data );
     ReadJsonValue( v, plotHeight, data );
     ReadJsonValue( v, frameTarget, data );
-    ReadJsonValue( v, flFrameHeightScale, data );
+    ReadJsonValue( v, flFrameHeight, data );
     ReadJsonValue( v, frameOverviewMaxTimeMS, data );
     ReadJsonValueTyped( v, shortenName, data, uint8_t );
     ReadJsonValue( v, stackCollapseMode, data );
@@ -127,6 +127,7 @@ static void LoadCommonJson( const rapidjson::Value& v, ViewDataCommon& data )
     ReadJsonValue( v, coreCollapseClamp, data );
     ReadJsonValue( v, viewContextSwitchStack, data );
     ReadJsonValue( v, drawMousePosTime, data );
+    ReadJsonValue( v, darkenOutsideExport, data );
     ReadJsonValue( v, autoZoneStats, data );
 
 #undef ReadJsonValueTyped
@@ -160,7 +161,7 @@ static void SaveCommonJson( rapidjson::Document::AllocatorType& alloc, rapidjson
     WriteJsonValue( v, ghostZones, data );
     WriteJsonValue( v, plotHeight, data );
     WriteJsonValue( v, frameTarget, data );
-    WriteJsonValue( v, flFrameHeightScale, data );
+    WriteJsonValue( v, flFrameHeight, data );
     WriteJsonValue( v, frameOverviewMaxTimeMS, data );
     WriteJsonValueTyped( v, shortenName, data, uint8_t );
     WriteJsonValue( v, stackCollapseMode, data );
@@ -170,6 +171,7 @@ static void SaveCommonJson( rapidjson::Document::AllocatorType& alloc, rapidjson
     WriteJsonValue( v, coreCollapseClamp, data );
     WriteJsonValue( v, viewContextSwitchStack, data );
     WriteJsonValue( v, drawMousePosTime, data );
+    WriteJsonValue( v, darkenOutsideExport, data );
     WriteJsonValue( v, autoZoneStats, data );
 
 #undef WriteJsonValueTyped
@@ -363,71 +365,95 @@ static void SavePlots( rapidjson::Document::AllocatorType& alloc, rapidjson::Val
 
 void SyncViewSettings( ViewData& vd, Worker& worker )
 {
-    const Vector<ThreadData*>& threadData = worker.GetThreadData();
-
-    std::unordered_map< const char*, size_t > uniqueThreadNames;
-    for ( const ThreadData* td : threadData )
     {
-        const char* pname = worker.GetThreadName( td->id );
-        if ( pname && (strcmp( pname, "???" ) != 0) )
-        {
-            uniqueThreadNames[ pname ]++;
-        }
-    }
+        const Vector<ThreadData*>& threadData = worker.GetThreadData();
 
-    for ( auto it = uniqueThreadNames.begin(), end = uniqueThreadNames.end(); it != end; )
-    {
-        if ( it->second > 1 )
+        std::unordered_map< const char*, size_t > uniqueThreadNames;
+        for ( const ThreadData* td : threadData )
         {
-            it = uniqueThreadNames.erase( it );
-        }
-        else
-        {
-            ++it;
-        }
-    }
-
-    for ( const ThreadData* td : threadData )
-    {
-        ViewData::Track defaultlts = {0};
-        defaultlts.visible = true;
-        auto localit = vd.threads.emplace( td->id, defaultlts );
-        if ( localit.second )
-        {
-            vd.threadsChanged = true;
-        }
-
-        ViewData::Track& lts = localit.first->second;
-
-        const bool manualChange = ( ( lts.flags & ViewData::Flags_Manual ) != 0 );
-        const bool appliedGlobal = ( ( lts.flags & ViewData::Flags_AppliedGlobal ) != 0 );
-
-        const char* pname = worker.GetThreadName( td->id );
-        if ( pname && (strcmp( pname, "???" ) != 0) )
-        {
-            const std::string name( pname );
-            if ( !worker.IsDataStatic() &&
-                 !manualChange &&
-                 !appliedGlobal )
+            const char* pname = worker.GetThreadName( td->id );
+            if ( pname && (strcmp( pname, "???" ) != 0) )
             {
-                // NOTE: if a name is not unique, we don't try to get the data we have in
-                // our global settings
-                if ( uniqueThreadNames.contains( pname ) )
-                {
-                    auto it = vd.globalThreads.find( name );
-                    if ( it != vd.globalThreads.end() )
-                    {
-                        lts.priority = it->second.priority;
-                        lts.visible = it->second.visible;
-                    }
-                }
-                lts.flags |= ViewData::Flags_AppliedGlobal;
+                uniqueThreadNames[ pname ]++;
+            }
+        }
+
+        for ( auto it = uniqueThreadNames.begin(), end = uniqueThreadNames.end(); it != end; )
+        {
+            if ( it->second > 1 )
+            {
+                it = uniqueThreadNames.erase( it );
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        for ( const ThreadData* td : threadData )
+        {
+            ViewData::Track defaultlts = {0};
+            defaultlts.visible = true;
+            auto localit = vd.threads.emplace( td->id, defaultlts );
+            if ( localit.second )
+            {
+                vd.threadsChanged = true;
             }
 
-            ViewData::Track gts;
-            gts.priority = lts.priority;
-            gts.visible = lts.visible;
-            vd.globalThreads[ name ] = gts;
+            ViewData::Track& lts = localit.first->second;
+
+            const bool manualChange = ( ( lts.flags & ViewData::Flags_Manual ) != 0 );
+            const bool appliedGlobal = ( ( lts.flags & ViewData::Flags_AppliedGlobal ) != 0 );
+
+            const char* pname = worker.GetThreadName( td->id );
+            if ( pname && (strcmp( pname, "???" ) != 0) )
+            {
+                const std::string name( pname );
+                if ( (!worker.IsDataStatic() || localit.second) &&
+                     !manualChange &&
+                     !appliedGlobal )
+                {
+                    // NOTE: if a name is not unique, we don't try to get the data we have in
+                    // our global settings
+                    if ( uniqueThreadNames.contains( pname ) )
+                    {
+                        auto it = vd.globalThreads.find( name );
+                        if ( it != vd.globalThreads.end() )
+                        {
+                            lts.ui = it->second.ui;
+                            lts.priority = it->second.priority;
+                            lts.visible = it->second.visible;
+                        }
+                    }
+                    lts.flags |= ViewData::Flags_AppliedGlobal;
+                }
+
+                ViewData::Track gts;
+                gts.ui = lts.ui;
+                gts.priority = lts.priority;
+                gts.visible = lts.visible;
+                vd.globalThreads[ name ] = gts;
+            }
+        }
+    }
+
+    {
+        const CpuData *cpuData = worker.GetCpuData();
+        const int cpuDataCount = worker.GetCpuDataCpuCount();
+        if ( cpuData )
+        {
+            for ( int i = 0; i < cpuDataCount; i++ )
+            {
+                const CpuData& cd = cpuData[ i ];
+
+                ViewData::Track defaultlts = {0};
+                defaultlts.visible = true;
+                auto localit = vd.cores.emplace( i, defaultlts );
+                if ( localit.second )
+                {
+                    vd.coresChanged = true;
+                }
+            }
         }
     }
 

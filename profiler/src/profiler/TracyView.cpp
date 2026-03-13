@@ -14,6 +14,7 @@
 #include "imgui.h"
 
 #include "TracyFileRead.hpp"
+#include "TracyFileselector.hpp"
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
 #include "TracyPrint.hpp"
@@ -182,14 +183,13 @@ void View::Achieve( const char* id )
 
 void View::InitResizeBar()
 {
-    const float defaultHeight = 50.0f;
     m_framesResize.id = 0;
     m_framesResize.wasActive = false;
     m_framesResize.thickness = 8.0f;
-    m_framesResize.defaultHeight = defaultHeight;
-    m_framesResize.minHeight = 5.0f;
-    m_framesResize.maxHeight = 500.0f;
-    m_framesResize.height = defaultHeight;
+    m_framesResize.defaultHeight = MIN_FRAMES_HEIGHT;
+    m_framesResize.minHeight = m_framesResize.defaultHeight;
+    m_framesResize.maxHeight = MAX_FRAMES_HEIGHT;
+    m_framesResize.height = std::clamp( m_vd.flFrameHeight, m_framesResize.minHeight, m_framesResize.maxHeight );
     m_framesResize.uiHeight = 0.0f;
     m_framesResize.color = ImVec4( 0.5f, 0.5f, 0.5f, 1.0f );
     m_framesResize.colActive = ImVec4( 0.9f, 1.0f, 0.9f, 1.0f );
@@ -341,29 +341,6 @@ static_assert( sizeof( CompressionName ) == sizeof( CompressionDesc ), "Unmatche
 
 bool View::Draw()
 {
-    if ( m_requestSaveSettings )
-    {
-        m_requestSaveSettings = false;
-        if ( m_worker.IsDataStatic() )
-        {
-            m_userData.SaveStateJson( m_vd, false );
-        }
-    }
-
-#ifndef TRACY_NO_STATISTICS
-    if ( m_requestSaveZonePlots )
-    {
-        m_requestSaveZonePlots = false;
-        m_userData.SaveZonePlotsJson( m_worker, m_worker.GetPlots() );
-    }
-
-    if ( m_requestLoadZonePlots && m_worker.AreSourceLocationZonesReady() )
-    {
-        m_requestLoadZonePlots = false;
-        m_userData.LoadZonePlotsJson( m_worker );
-    }
-#endif
-
     HandshakeStatus status = (HandshakeStatus)m_worker.GetHandshakeStatus();
     switch( status )
     {
@@ -643,7 +620,21 @@ bool View::Draw()
     bool saveFailed = false;
     if( !m_filenameStaging.empty() )
     {
-        ImGui::OpenPopup( "Save trace" );
+        if ( m_exportRange.active )
+        {
+            auto fn = m_filenameStaging.c_str();
+            static FileCompression comp = FileCompression::Zstd;
+            static int zlvl = 3;
+            static bool buildDict = false;
+            static int streams = 4;
+            saveFailed = !Save( fn, comp, zlvl, buildDict, streams, m_exportRange );
+            m_exportRange = RangeSlim{ 0 };
+            m_filenameStaging.clear();
+        }
+        else
+        {
+            ImGui::OpenPopup( "Save trace" );
+        }
     }
     if( ImGui::BeginPopupModal( "Save trace", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
@@ -699,7 +690,8 @@ bool View::Draw()
         ImGui::Separator();
         if( ImGui::Button( ICON_FA_FLOPPY_DISK " Save trace" ) )
         {
-            saveFailed = !Save( fn, comp, zlvl, buildDict, streams );
+            m_exportRange.active = false;
+            saveFailed = !Save( fn, comp, zlvl, buildDict, streams, m_exportRange );
             m_filenameStaging.clear();
             ImGui::CloseCurrentPopup();
             Achieve( "saveTrace" );
@@ -808,7 +800,7 @@ bool View::DrawImpl()
     const auto& io = ImGui::GetIO();
     m_wasActive = false;
 
-    assert( m_shortcut == ShortcutAction::None );
+    //assert( m_shortcut == ShortcutAction::None );
     if( io.KeyCtrl )
     {
         if( ImGui::IsKeyPressed( ImGuiKey_F ) )
@@ -895,6 +887,28 @@ bool View::DrawImpl()
     }
     std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
     m_worker.DoPostponedWork();
+
+    SyncViewSettings( m_vd, m_worker );
+    if ( m_requestSaveSettings )
+    {
+        m_requestSaveSettings = false;
+        m_userData.SaveStateJson( m_vd, !m_worker.IsDataStatic() );
+    }
+
+#ifndef TRACY_NO_STATISTICS
+    if ( m_requestSaveZonePlots )
+    {
+        m_requestSaveZonePlots = false;
+        m_userData.SaveZonePlotsJson( m_worker, m_worker.GetPlots() );
+    }
+
+    if ( m_requestLoadZonePlots && m_worker.AreSourceLocationZonesReady() )
+    {
+        m_requestLoadZonePlots = false;
+        m_userData.LoadZonePlotsJson( m_worker );
+    }
+#endif
+
     if( !m_worker.IsDataStatic() )
     {
         if( m_worker.IsConnected() )
@@ -1305,6 +1319,52 @@ bool View::DrawImpl()
         {
             AddAnnotation( s, e );
         }
+        {
+            m_exportRange = RangeSlim{ 0 };
+            m_exportRange.min = s;
+            m_exportRange.max = e;
+
+            ImGui::Separator();
+            if( ImGui::Selectable( ICON_FA_FLOPPY_DISK " Export Selection to file" ) )
+            {
+                m_exportRange.active = true;
+            }
+            if( ImGui::Selectable( ICON_FA_FLOPPY_DISK " Export Frames to file" ) )
+            {
+                if ( m_worker.AreFramesUsed() )
+                {
+                    const FrameData& fd = *m_worker.GetFramesBase();
+                    std::pair<int64_t, int64_t> range = m_worker.ClampToFrames( fd, s, e );
+                    m_exportRange.min = range.first;
+                    m_exportRange.max = range.second;
+                }
+
+                m_exportRange.active = true;
+            }
+
+            if ( m_exportRange.active )
+            {
+                auto cb = [this]( const char* fn ) {
+                    const auto sz = strlen( fn );
+                    if( sz < 7 || memcmp( fn + sz - 6, ".tracy", 6 ) != 0 )
+                    {
+                        char tmp[1024];
+                        sprintf( tmp, "%s.tracy", fn );
+                        m_filenameStaging = tmp;
+                    }
+                    else
+                    {
+                        m_filenameStaging = fn;
+                    }
+                };
+
+        #ifndef TRACY_NO_FILESELECTOR
+                Fileselector::SaveFile( "tracy", "Tracy Profiler trace file", cb );
+        #else
+                cb( "trace.tracy" );
+        #endif
+            }
+        }
         ImGui::EndPopup();
     }
     m_setRangePopupOpen = ImGui::IsPopupOpen( "SetZoneRange" );
@@ -1425,11 +1485,11 @@ bool View::DrawImpl()
         const auto inFlight = m_worker.GetSendInFlight();
         if( inFlight > 1 || ( inFlight == 1 && !m_worker.WasDisconnectIssued() ) )
         {
-			if ( !m_disconnectIssued )
-			{
-            ImGui::OpenPopup( "Connection lost!" );
+            if ( !m_disconnectIssued )
+            {
+                ImGui::OpenPopup( "Connection lost!" );
+            }
         }
-    }
     }
     if( ImGui::BeginPopupModal( "Connection lost!", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
@@ -1533,7 +1593,7 @@ void View::DrawSourceTooltip( const char* filename, uint32_t srcline, int before
     ImGui::PopStyleVar();
 }
 
-bool View::Save( const char* fn, FileCompression comp, int zlevel, bool buildDict, int streams )
+bool View::Save( const char* fn, FileCompression comp, int zlevel, bool buildDict, int streams, const RangeSlim& range )
 {
     std::unique_ptr<FileWrite> f( FileWrite::Open( fn, comp, zlevel, streams ) );
     if( !f ) return false;
@@ -1541,9 +1601,16 @@ bool View::Save( const char* fn, FileCompression comp, int zlevel, bool buildDic
     m_userData.StateShouldBePreserved();
     if( !m_userData.Valid() ) m_userData.Init( m_worker.GetCaptureProgram().c_str(), m_worker.GetCaptureTime() );
     m_saveThreadState.store( SaveThreadState::Saving, std::memory_order_relaxed );
-    m_saveThread = std::thread( [this, f{std::move( f )}, buildDict] {
+    m_saveThread = std::thread( [this, f{std::move( f )}, buildDict, range] {
         std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
-        m_worker.Write( *f, buildDict );
+        if ( range.active )
+        {
+            m_worker.WriteTimeRange( *f, buildDict, range.min, range.max );
+        }
+        else
+        {
+            m_worker.Write( *f, buildDict );
+        }
         m_userData.SaveStateJson( m_vd, false );
         f->Finish();
         const auto stats = f->GetCompressionStatistics();

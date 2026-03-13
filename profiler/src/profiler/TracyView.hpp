@@ -8,6 +8,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <chrono>
 
 #include "imgui.h"
 
@@ -53,6 +54,7 @@ struct CpuCtxDraw;
 struct LockDraw;
 struct DrawLockInfo;
 struct PlotDraw;
+struct HwCounterDraw;
 
 
 struct TimelineResizeBar
@@ -197,17 +199,20 @@ public:
     void HighlightThread( uint64_t thread );
     void ZoomToRange( int64_t start, int64_t end, bool pause = true );
     bool DrawPlot( const TimelineContext& ctx, PlotData& plot, const std::vector<uint32_t>& plotDraw, uint32_t iBegin, uint32_t iEnd, int& offset, double yAxisMax, uint32_t flags, int height );
-    void DrawThread( const TimelineContext& ctx, const ThreadData& thread, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, const std::vector<SamplesDraw>& samplesDraw, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, int& offset, int depth, bool hasCtxSwitches, bool hasSamples );
+    void DrawThread( const TimelineContext& ctx, const ThreadData& thread, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, const std::vector<SamplesDraw>& samplesDraw, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, const HwCounterDraw &hwCounterDraw, int& offset, int depth, bool hasCtxSwitches, bool hasSamples, bool hasHwCounter );
     void DrawThreadMessagesList( const TimelineContext& ctx, const std::vector<MessagesDraw>& drawList, int offset, uint64_t tid );
     void DrawThreadOverlays( const ThreadData& thread, const ImVec2& ul, const ImVec2& dr );
-    bool DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset, unordered_flat_map<uint64_t, int32_t>& depths );
+    bool DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset);
     bool DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDraw>& cpuDraw, const std::vector<std::vector<CpuCtxDraw>>& ctxDraw, int& offset, bool hasCpuData, bool drawThreadInteractions );
-    void DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, int& offset, int depth );
-    void DrawTrackUiControls( const TimelineContext &ctx, const char *label, int maxDepth, int depth, TrackUiData &rData, TrackUiSettings &rVdTrackSettings, int start, int &offset, float xOffset );
+    void DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, const HwCounterDraw& hwCounterDraw, int& offset, int depth );
+    void DrawTrackUiControls( const TimelineContext &ctx, const char *label, int maxDepth, int depth, TrackUiData &rData, ViewData::Track &rVdTrackSettings, int start, int &offset, float xOffset );
 
-	const ThreadData *GetThreadDataForCpu( uint8_t cpu, int64_t time );
+    const ThreadData *GetThreadDataForCpu( uint8_t cpu, int64_t time );
 
     bool IsBackgroundDone() const { return m_worker.IsBackgroundDone(); }
+
+    void ResetHwCounterMaxValues();
+    void UpdateHwCounterMaxValues( uint64_t maxCount, float maxRate );
 
     bool m_showRanges = false;
     Range m_statRange;
@@ -290,6 +295,7 @@ private:
     void DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int offset, uint64_t tidOrCoreIndex );
     void DrawContextSwitchList( const TimelineContext& ctx, const std::vector<ContextSwitchDraw>& drawList, const Vector<ContextSwitchData>& ctxSwitch, int offset, int endOffset, bool isFiber );
     void DrawContextSwitchList( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<ContextSwitchDraw> &drawList, int offset, int endOffset, bool isFiber );
+    void DrawHwCounterList( const TimelineContext &ctx, const HwCounterDraw &drawList, int offset, int height, int endZoneOffset );
     int DispatchGpuZoneLevel( const Vector<short_ptr<GpuEvent>>& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
     template<typename Adapter, typename V>
     int DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
@@ -394,7 +400,7 @@ private:
     const GpuCtxData* GetZoneCtx( const GpuEvent& zone ) const;
     bool FindMatchingZone( int prev0, int prev1, int flags );
     const ZoneEvent* FindZoneAtTime( uint64_t thread, int64_t time ) const;
-    uint64_t GetFrameNumber( const FrameData& fd, int i ) const;
+    int64_t GetFrameNumber( const FrameData& fd, int i ) const;
     const char* GetFrameText( const FrameData& fd, int i, uint64_t ftime ) const;
     const char* GetFrameSetName( const FrameData& fd ) const;
     static const char* GetFrameSetName( const FrameData& fd, const Worker& worker );
@@ -429,7 +435,7 @@ private:
     void CalcZoneTimeDataImpl( const V& children, const ContextSwitch* ctx, unordered_flat_map<int16_t, ZoneTimeData>& data, int64_t& ztime );
 
     void SetPlaybackFrame( uint32_t idx );
-    bool Save( const char* fn, FileCompression comp, int zlevel, bool buildDict, int streams );
+    bool Save( const char* fn, FileCompression comp, int zlevel, bool buildDict, int streams, const RangeSlim& range );
 
     void Attention( bool& alreadyDone );
     void UpdateTitle();
@@ -482,6 +488,7 @@ private:
 
     Worker m_worker;
     std::string m_filename, m_filenameStaging;
+    RangeSlim m_exportRange;
     bool m_staticView;
     ViewMode m_viewMode;
     bool m_viewModeHeuristicTry = false;
@@ -490,7 +497,7 @@ private:
 
     int64_t m_timeAtMouse;
     double m_nsPerPixel;
-	
+
     bool m_requestSaveSettings;
     bool m_requestSaveZonePlots;
     bool m_requestLoadZonePlots;
@@ -557,7 +564,7 @@ private:
     bool m_showWaitStacks = false;
 
     bool m_showCoreView = false;
-	
+
     AccumulationMode m_statAccumulationMode = AccumulationMode::SelfOnly;
     bool m_statSampleTime = true;
     int m_statMode = 0;
@@ -738,6 +745,7 @@ private:
             match.clear();
             selMatch = 0;
             selGroup = Unselected;
+            groupBy = GroupBy::ZoneName;
             highlight.active = false;
             samples.counts.clear();
         }
@@ -957,6 +965,12 @@ private:
 
     AchievementsMgr* m_achievementsMgr;
     bool m_achievements = false;
+
+    // hw counter max count and rate for the current view (all track)
+    // used when all hw counter graphs use the same Y axis scale
+    uint64_t m_hwCounterMaxCount;
+    float m_hwCounterMaxRate;
+    std::mutex m_hwCounterLock;     // max values updated concurrently
 };
 
 }

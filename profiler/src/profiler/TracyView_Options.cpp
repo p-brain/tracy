@@ -42,9 +42,9 @@ void View::DrawOptions()
     }
 
     ImGui::SetNextItemWidth( 90 * scale );
-    ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeightScale, 1.0f, 10.0f, "%.3fx", ImGuiSliderFlags_AlwaysClamp );
+    ImGui::SliderFloat( "##fheight", &m_vd.flFrameHeight, MIN_FRAMES_HEIGHT, MAX_FRAMES_HEIGHT, "%.3fx", ImGuiSliderFlags_AlwaysClamp );
     ImGui::SameLine();
-    ImGui::Text( "Frames Scale" );
+    ImGui::Text( "Frames Height" );
 
     ImGui::SetNextItemWidth( 90 * scale );
     if ( ImGui::InputInt( "##Max", &m_vd.frameOverviewMaxTimeMS ) )
@@ -94,7 +94,11 @@ void View::DrawOptions()
     val = m_vd.drawMousePosTime;
     ImGui::Checkbox( ICON_FA_CLOCK " Draw time at mouse position", &val );
     m_vd.drawMousePosTime = val;
-	
+
+    val = m_vd.darkenOutsideExport;
+    ImGui::Checkbox( ICON_FA_CIRCLE_HALF_STROKE " Darken outside export range", &val );
+    m_vd.darkenOutsideExport = val;
+
     if( m_worker.HasContextSwitches() )
     {
         ImGui::Separator();
@@ -126,6 +130,70 @@ void View::DrawOptions()
         val = m_vd.drawSamples;
         ImGui::Checkbox( ICON_FA_EYE_DROPPER " Draw stack samples", &val );
         m_vd.drawSamples = val;
+    }
+
+    if ( m_worker.GetHwCounterCount() )
+    {
+        static char tmpBuf[ 1024 ];
+        const char *hwCounterName = m_worker.GetHwCounterName().Active() ? m_worker.GetString( m_worker.GetHwCounterName() ) : "L2 cache misses";
+        
+        ImGui::Separator();
+        val = m_vd.drawHwCounter;
+        sprintf( tmpBuf, ICON_FA_MEMORY " Hardware counter - %s", hwCounterName );
+        ImGui::Checkbox( tmpBuf, &val );
+        m_vd.drawHwCounter = val;
+
+        ImGui::Indent();
+
+        // draw mode
+        int ival = ( ( int )m_vd.hwCounterDrawMode ) % ( (int)ViewData::EHwCounterDrawMode::DrawModeCount );
+        ImGui::TextUnformatted( ICON_FA_CHART_COLUMN " Graph type" );
+        ImGui::Indent();
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
+        ImGui::RadioButton( hwCounterName, &ival, (uint8_t)ViewData::EHwCounterDrawMode::BarGraph_Count );
+        sprintf( tmpBuf, "%s/\xce\xbcs", hwCounterName );
+        ImGui::RadioButton( tmpBuf, &ival, (uint8_t)ViewData::EHwCounterDrawMode::BarGraph_Rate );
+        ImGui::RadioButton( "Text mode", &ival, ( uint8_t ) ViewData::EHwCounterDrawMode::TextMode );
+        ImGui::PopStyleVar();
+        ImGui::Unindent();
+        m_vd.hwCounterDrawMode = (ViewData::EHwCounterDrawMode )ival;
+
+        // Y axis
+        val = m_vd.hwCounterYAxisSameScale;
+        ImGui::Checkbox( "Y axis - all tracks using same scale", &val );
+        m_vd.hwCounterYAxisSameScale = val;
+
+        // target rate
+        ival = m_vd.hwCounterRateTarget;
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
+        ImGui::SetNextItemWidth( 90 * scale );
+        sprintf( tmpBuf, "'%s/\xce\xbcs' target rate", hwCounterName );
+        if ( ImGui::InputInt( tmpBuf, &ival ) )
+        {
+            if( ival < 1 ) ival = 1;
+            m_vd.hwCounterRateTarget = ival;
+        }
+        ImGui::PopStyleVar();
+
+        ImGui::Indent();
+        ImGui::PushFont( m_smallFont );
+        SmallColorBox( 0xFF22DD22 );
+        ImGui::SameLine( 0, 0 );
+        ImGui::Text( "  <  %i  <  ", ival );
+        ImGui::SameLine( 0, 0 );
+        SmallColorBox( 0xFF00FFFF );
+        ImGui::SameLine( 0, 0 );
+        ImGui::Text( "  <  %i  <  ", int(ival * 1.5f) );
+        ImGui::SameLine( 0, 0 );
+        SmallColorBox( 0xFF0088FF );        
+        ImGui::SameLine( 0, 0 );
+        ImGui::Text( "  <  %i  <  ", ival * 2 );
+        ImGui::SameLine( 0, 0 );
+        SmallColorBox( 0xFF0000FF );
+        ImGui::PopFont();
+        ImGui::Unindent();
+
+        ImGui::Unindent();
     }
 
     const auto& gpuData = m_worker.GetGpuData();
@@ -1066,174 +1134,260 @@ void View::DrawOptions()
         }
     }
 
-    ImGui::Separator();
-    auto expand = ImGui::TreeNode( ICON_FA_SHUFFLE " Visible threads:" );
-    ImGui::SameLine();
-    ImGui::TextDisabled( "(%zu)", m_threadOrder.size() );
-    if( expand )
+    if( m_showCoreView && m_worker.HasContextSwitches() )
     {
-        bool settingsChanged = false;
-        auto& crash = m_worker.GetCrashEvent();
+        const CpuData *cpuData = m_worker.GetCpuData();
+        const int cpuDataCount = m_worker.GetCpuDataCpuCount();
 
-        ImGui::SameLine();
-        if( ImGui::SmallButton( "Select all" ) )
+        if ( cpuData && ( cpuDataCount > 0 ) )
         {
-            for( const auto& t : m_threadOrder )
+            struct IdAndData
             {
-                m_tc.GetItem( t ).SetVisible( true );
-            }
-            settingsChanged = true;
-        }
-        ImGui::SameLine();
-        if( ImGui::SmallButton( "Unselect all" ) )
-        {
-            for( const auto& t : m_threadOrder )
+                int id;
+                const CpuData *pData;
+            };
+
+            std::vector< IdAndData > allCpuThreads;
+            allCpuThreads.reserve( cpuDataCount );
+
+            for( int i = 0; i < cpuDataCount; i++ )
             {
-                m_tc.GetItem( t ).SetVisible( false );
+                const CpuData *pPerCpuData = &cpuData[ i ];
+                allCpuThreads.push_back( IdAndData{ i, pPerCpuData } );
             }
-            settingsChanged = true;
-        }
-        ImGui::SameLine();
-        if( ImGui::SmallButton( "Sort" ) )
-        {
-            std::sort( m_threadOrder.begin(), m_threadOrder.end(), [this] ( const auto& lhs, const auto& rhs ) {
-                if( lhs->groupHint != rhs->groupHint ) return lhs->groupHint < rhs->groupHint;
-                return strcmp( m_worker.GetThreadName( lhs->id ), m_worker.GetThreadName( rhs->id ) ) < 0;
-            } );
-        }
 
-        const auto wposx = ImGui::GetCursorScreenPos().x;
-        m_threadDnd.clear();
-        int idx = 0;
-
-        for( const auto& t : m_threadOrder )
-        {
-            m_threadDnd.push_back( ImGui::GetCursorScreenPos().y );
-            ImGui::PushID( idx );
-            const auto threadName = m_worker.GetThreadName( t->id );
-            const auto threadColor = GetThreadColor( t->id, 0 );
-            SmallColorBox( threadColor );
+            ImGui::Separator();
+            bool expand = ImGui::TreeNode( ICON_FA_SHUFFLE " Visible cores:" );
             ImGui::SameLine();
-            settingsChanged |= m_tc.GetItem( t ).VisibilityCheckbox();
-            if( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
+            ImGui::TextDisabled( "(%zu)", allCpuThreads.size() );
+            if( expand )
             {
-                ImGui::SetDragDropPayload( "ThreadOrder", &idx, sizeof(int) );
-                ImGui::TextUnformatted( ICON_FA_SHUFFLE );
+                bool settingsChanged = false;
+
                 ImGui::SameLine();
-                SmallColorBox( threadColor );
-                ImGui::SameLine();
-                ImGui::TextUnformatted( threadName );
-                ImGui::EndDragDropSource();
-            }
-            ImGui::PopID();
-            ImGui::SameLine();
-            ImGui::TextDisabled( "(%s)", RealToString( t->id ) );
-            if( crash.thread == t->id )
-            {
-                ImGui::SameLine();
-                TextColoredUnformatted( ImVec4( 1.f, 0.2f, 0.2f, 1.f ), ICON_FA_SKULL );
-                if( ImGui::IsItemHovered() )
+                if( ImGui::SmallButton( "Select all" ) )
                 {
-                    ImGui::BeginTooltip();
-                    ImGui::TextUnformatted( "Crashed" );
-                    ImGui::EndTooltip();
-                    if( IsMouseClicked( 0 ) )
+                    for( const IdAndData& t : allCpuThreads )
                     {
-                        m_showInfo = true;
+                        m_tc.GetItem( t.pData ).SetVisible( true );
                     }
-                    if( IsMouseClicked( 2 ) )
-                    {
-                        CenterAtTime( crash.time );
-                    }
+                    settingsChanged = true;
                 }
-            }
-            if( t->isFiber )
-            {
                 ImGui::SameLine();
-                TextColoredUnformatted( ImVec4( 0.2f, 0.6f, 0.2f, 1.f ), "Fiber" );
-            }
-            ImGui::SameLine();
-            ImGui::TextDisabled( "%s top level zones", RealToString( t->timeline.size() ) );
-            if ( m_worker.IsDataStatic() )
-            {
-                ImGui::SameLine();
-                ImGui::TextDisabled( "Max stack depth: %s", RealToString( t->maxDepth ) );
-            }
-            idx++;
-        }
-        if( m_threadDnd.size() > 1 )
-        {
-            const auto w = ImGui::GetContentRegionAvail().x;
-            const auto dist = m_threadDnd[1] - m_threadDnd[0];
-            const auto half = dist * 0.5f;
-            m_threadDnd.push_back( m_threadDnd.back() + dist );
-
-            int target = -1;
-            int source;
-            for( size_t i=0; i<m_threadDnd.size(); i++ )
-            {
-                if( ImGui::BeginDragDropTargetCustom( ImRect( wposx, m_threadDnd[i] - half, wposx + w, m_threadDnd[i] + half ), i+1 ) )
+                if( ImGui::SmallButton( "Unselect all" ) )
                 {
-                    auto draw = ImGui::GetWindowDrawList();
-                    draw->AddLine( ImVec2( wposx, m_threadDnd[i] ), ImVec2( wposx + w, m_threadDnd[i] ), ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.f );
-                    if( auto payload = ImGui::AcceptDragDropPayload( "ThreadOrder", ImGuiDragDropFlags_AcceptNoDrawDefaultRect ) )
+                    for( const IdAndData& t : allCpuThreads )
                     {
-                        target = (int)i;
-                        source = *(int*)payload->Data;
+                        m_tc.GetItem( t.pData ).SetVisible( false );
                     }
-                    ImGui::EndDragDropTarget();
+                    settingsChanged = true;
                 }
-            }
-            if( target >= 0 && target != source )
-            {
-                settingsChanged = true;
 
-                const auto srcval = m_threadOrder[source];
-                if( target < source )
+                for ( const IdAndData& t : allCpuThreads )
                 {
-                    assert( source < (int)m_threadOrder.size() );
-                    m_threadOrder.erase( m_threadOrder.begin() + source );
-                    m_threadOrder.insert( m_threadOrder.begin() + target, srcval );
+                    settingsChanged |= m_tc.GetItem( t.pData ).VisibilityCheckbox();
                 }
-                else
-                {
-                    assert( target <= (int)m_threadOrder.size() );
-                    m_threadOrder.insert( m_threadOrder.begin() + target, srcval );
-                    m_threadOrder.erase( m_threadOrder.begin() + source );
-                }
-            }
-        }
-        ImGui::TreePop();
+                ImGui::TreePop();
 
-        if (settingsChanged)
-        {
-            for (int32_t i = 0; i < m_threadOrder.size(); i++)
-            {
-                uint8_t flags = 0;
-                const ThreadData *td = m_threadOrder[ i ];
-                const bool visible = m_tc.GetItem( td ).IsVisible();
-                auto it = m_vd.threads.find( td->id );
-                if ( it != m_vd.threads.end() )
+                if (settingsChanged)
                 {
-                    if ( ( i != it->second.priority) || ( visible != it->second.visible ) )
+                    for (int32_t i = 0; i < allCpuThreads.size(); i++)
                     {
-                        flags |= ViewData::Flags_Manual;
+                        uint8_t flags = 0;
+
+                        const IdAndData& t = allCpuThreads[ i ];
+                        const bool visible = m_tc.GetItem( t.pData ).IsVisible();
+                        auto it = m_vd.cores.find( t.id );
+                        if ( it != m_vd.cores.end() )
+                        {
+                            if ( ( i != it->second.priority) || ( visible != it->second.visible ) )
+                            {
+                                flags |= ViewData::Flags_Manual;
+                            }
+                        }
+
+                        m_vd.cores[ t.id ].priority = i;
+                        m_vd.cores[ t.id ].visible = visible;
+                        m_vd.cores[ t.id ].flags = flags;
                     }
+
+                    m_vd.coresChanged = true;
                 }
-
-                m_vd.threads[ td->id ].priority = i;
-                m_vd.threads[ td->id ].visible = visible;
-                m_vd.threads[ td->id ].flags = flags;
             }
-
-            m_vd.threadsChanged = true;
         }
     }
+    else
+    {
+        ImGui::Separator();
+        auto expand = ImGui::TreeNode( ICON_FA_SHUFFLE " Visible threads:" );
+        ImGui::SameLine();
+        ImGui::TextDisabled( "(%zu)", m_threadOrder.size() );
+        if( expand )
+        {
+            bool settingsChanged = false;
+            auto& crash = m_worker.GetCrashEvent();
+
+            ImGui::SameLine();
+            if( ImGui::SmallButton( "Select all" ) )
+            {
+                for( const auto& t : m_threadOrder )
+                {
+                    m_tc.GetItem( t ).SetVisible( true );
+                }
+                settingsChanged = true;
+            }
+            ImGui::SameLine();
+            if( ImGui::SmallButton( "Unselect all" ) )
+            {
+                for( const auto& t : m_threadOrder )
+                {
+                    m_tc.GetItem( t ).SetVisible( false );
+                }
+                settingsChanged = true;
+            }
+            ImGui::SameLine();
+            if( ImGui::SmallButton( "Sort" ) )
+            {
+                std::sort( m_threadOrder.begin(), m_threadOrder.end(), [this] ( const auto& lhs, const auto& rhs ) {
+                    if( lhs->groupHint != rhs->groupHint ) return lhs->groupHint < rhs->groupHint;
+                    return strcmp( m_worker.GetThreadName( lhs->id ), m_worker.GetThreadName( rhs->id ) ) < 0;
+                } );
+            }
+
+            const auto wposx = ImGui::GetCursorScreenPos().x;
+            m_threadDnd.clear();
+            int idx = 0;
+
+            for( const auto& t : m_threadOrder )
+            {
+                m_threadDnd.push_back( ImGui::GetCursorScreenPos().y );
+                ImGui::PushID( idx );
+                const auto threadName = m_worker.GetThreadName( t->id );
+                const auto threadColor = GetThreadColor( t->id, 0 );
+                SmallColorBox( threadColor );
+                ImGui::SameLine();
+                settingsChanged |= m_tc.GetItem( t ).VisibilityCheckbox();
+                if( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
+                {
+                    ImGui::SetDragDropPayload( "ThreadOrder", &idx, sizeof(int) );
+                    ImGui::TextUnformatted( ICON_FA_SHUFFLE );
+                    ImGui::SameLine();
+                    SmallColorBox( threadColor );
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted( threadName );
+                    ImGui::EndDragDropSource();
+                }
+                ImGui::PopID();
+                ImGui::SameLine();
+                ImGui::TextDisabled( "(%s)", RealToString( t->id ) );
+                if( crash.thread == t->id )
+                {
+                    ImGui::SameLine();
+                    TextColoredUnformatted( ImVec4( 1.f, 0.2f, 0.2f, 1.f ), ICON_FA_SKULL );
+                    if( ImGui::IsItemHovered() )
+                    {
+                        ImGui::BeginTooltip();
+                        ImGui::TextUnformatted( "Crashed" );
+                        ImGui::EndTooltip();
+                        if( IsMouseClicked( 0 ) )
+                        {
+                            m_showInfo = true;
+                        }
+                        if( IsMouseClicked( 2 ) )
+                        {
+                            CenterAtTime( crash.time );
+                        }
+                    }
+                }
+                if( t->isFiber )
+                {
+                    ImGui::SameLine();
+                    TextColoredUnformatted( ImVec4( 0.2f, 0.6f, 0.2f, 1.f ), "Fiber" );
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled( "%s top level zones", RealToString( t->timeline.size() ) );
+                if ( m_worker.IsDataStatic() )
+                {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled( "Max stack depth: %s", RealToString( t->maxDepth ) );
+                }
+                idx++;
+            }
+            if( m_threadDnd.size() > 1 )
+            {
+                const auto w = ImGui::GetContentRegionAvail().x;
+                const auto dist = m_threadDnd[1] - m_threadDnd[0];
+                const auto half = dist * 0.5f;
+                m_threadDnd.push_back( m_threadDnd.back() + dist );
+
+                int target = -1;
+                int source;
+                for( size_t i=0; i<m_threadDnd.size(); i++ )
+                {
+                    if( ImGui::BeginDragDropTargetCustom( ImRect( wposx, m_threadDnd[i] - half, wposx + w, m_threadDnd[i] + half ), i+1 ) )
+                    {
+                        auto draw = ImGui::GetWindowDrawList();
+                        draw->AddLine( ImVec2( wposx, m_threadDnd[i] ), ImVec2( wposx + w, m_threadDnd[i] ), ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.f );
+                        if( auto payload = ImGui::AcceptDragDropPayload( "ThreadOrder", ImGuiDragDropFlags_AcceptNoDrawDefaultRect ) )
+                        {
+                            target = (int)i;
+                            source = *(int*)payload->Data;
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                }
+                if( target >= 0 && target != source )
+                {
+                    settingsChanged = true;
+
+                    const auto srcval = m_threadOrder[source];
+                    if( target < source )
+                    {
+                        assert( source < (int)m_threadOrder.size() );
+                        m_threadOrder.erase( m_threadOrder.begin() + source );
+                        m_threadOrder.insert( m_threadOrder.begin() + target, srcval );
+                    }
+                    else
+                    {
+                        assert( target <= (int)m_threadOrder.size() );
+                        m_threadOrder.insert( m_threadOrder.begin() + target, srcval );
+                        m_threadOrder.erase( m_threadOrder.begin() + source );
+                    }
+                }
+            }
+            ImGui::TreePop();
+
+            if (settingsChanged)
+            {
+                for (int32_t i = 0; i < m_threadOrder.size(); i++)
+                {
+                    uint8_t flags = 0;
+                    const ThreadData *td = m_threadOrder[ i ];
+                    const bool visible = m_tc.GetItem( td ).IsVisible();
+                    auto it = m_vd.threads.find( td->id );
+                    if ( it != m_vd.threads.end() )
+                    {
+                        if ( ( i != it->second.priority) || ( visible != it->second.visible ) )
+                        {
+                            flags |= ViewData::Flags_Manual;
+                        }
+                    }
+
+                    m_vd.threads[ td->id ].priority = i;
+                    m_vd.threads[ td->id ].visible = visible;
+                    m_vd.threads[ td->id ].flags = flags;
+                }
+
+                m_vd.threadsChanged = true;
+            }
+        }
+    }
+
 
     if( m_worker.AreFramesUsed() )
     {
         ImGui::Separator();
-        expand = ImGui::TreeNode( ICON_FA_IMAGES " Visible frame sets:" );
+        auto expand = ImGui::TreeNode( ICON_FA_IMAGES " Visible frame sets:" );
         ImGui::SameLine();
         ImGui::TextDisabled( "(%zu)", m_worker.GetFrames().size() );
         if( expand )

@@ -278,7 +278,8 @@ void View::DrawTimelineFrames( const FrameData& frames )
         if( fsz - 7 <= tx )
         {
             static char tmp[256];
-            sprintf( tmp, "%s (%s)", RealToString( i ), TimeToString( ftime ) );
+            int64_t frameNum = GetFrameNumber( frames, i );
+            sprintf( tmp, "%s (%s)", RealToString( frameNum ), TimeToString( ftime ) );
             buf = tmp;
             tx = ImGui::CalcTextSize( buf ).x;
         }

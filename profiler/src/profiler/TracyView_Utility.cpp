@@ -774,19 +774,13 @@ int64_t View::AdjustGpuTime( int64_t time, int64_t begin, int drift )
     return time + t / 1000000000 * drift;
 }
 
-uint64_t View::GetFrameNumber( const FrameData& fd, int i ) const
+int64_t View::GetFrameNumber( const FrameData& fd, int i ) const
 {
     if( fd.name == 0 )
     {
-        const auto offset = m_worker.GetFrameOffset();
-        if( offset == 0 )
-        {
-            return i;
-        }
-        else
-        {
-            return i + offset - 1;
-        }
+        const int64_t frameOffset = (int64_t)m_worker.GetFrameOffset();
+        const int64_t frameAdjust = ( m_worker.IsOnDemand() ? 3 : 2 );
+		return i + frameOffset - frameAdjust;
     }
     else
     {
@@ -1012,7 +1006,7 @@ float UpdateAndDrawResizeBar( TimelineResizeBar &resizeBar )
 }
 
 
-void View::DrawTrackUiControls( const TimelineContext &ctx, const char* label, int maxDepth, int depth, TrackUiData& rData, TrackUiSettings& rVdTrackSettings, int start, int &offset, float xOffset )
+void View::DrawTrackUiControls( const TimelineContext &ctx, const char* label, int maxDepth, int depth, TrackUiData& rData, ViewData::Track& rVdTrackSettings, int start, int &offset, float xOffset )
 {
     if ( rData.preventScroll > 0 )
     {
@@ -1114,9 +1108,16 @@ void View::DrawTrackUiControls( const TimelineContext &ctx, const char* label, i
         ImGui::SetCursorPosX( wndContentRegionMax.x - ctrlButtonWidth );
     }
 
-    if ( ImGui::SmallButton( ICON_FA_BARS ) )
     {
-        ImGui::OpenPopup( controlPopupName );
+        ImVec4 curCol = ImGui::GetStyle().Colors[ImGuiCol_Text];
+        const ImVec4 overrideCol( 0.75f, 1.0f, 0.75f, 1.0f );
+        const ImVec4 buttonColor = shouldOverride ? overrideCol : curCol;
+        ImGui::PushStyleColor( ImGuiCol_Text, buttonColor );
+        if( ImGui::SmallButton( ICON_FA_BARS ) )
+        {
+            ImGui::OpenPopup( controlPopupName );
+        }
+        ImGui::PopStyleColor( 1 );
     }
 
     if ( ImGui::BeginPopup( controlPopupName ) )
@@ -1230,9 +1231,10 @@ void View::DrawTrackUiControls( const TimelineContext &ctx, const char* label, i
 
     ImGui::SetCursorPosY( offset );
 
-    if ( rData.settings != rVdTrackSettings )
+    if ( rData.settings != rVdTrackSettings.ui )
     {
-        rVdTrackSettings = rData.settings;
+        rVdTrackSettings.flags |= ViewData::Flags_Manual;
+        rVdTrackSettings.ui = rData.settings;
         RequestSaveSettings();
     }
 }

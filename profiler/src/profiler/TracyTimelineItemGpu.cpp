@@ -201,14 +201,7 @@ int64_t TimelineItemGpu::RangeEnd() const
 
 bool TimelineItemGpu::DrawContents( const TimelineContext& ctx, int& offset )
 {
-    unordered_flat_map<uint64_t, int32_t> depths;
-    depths.reserve( m_gpu->threadData.size() );
-    bool result = m_view.DrawGpu( ctx, *m_gpu, offset, depths );
-    for ( auto &td : m_gpu->threadData )
-    {
-        td.second.maxDepth = std::max( td.second.maxDepth, depths[ td.first ] );
-    }
-    return result;
+    return m_view.DrawGpu( ctx, *m_gpu, offset );
 }
 
 }

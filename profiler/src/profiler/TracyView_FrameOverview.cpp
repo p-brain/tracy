@@ -53,7 +53,7 @@ void View::DrawFrames()
     assert( m_worker.GetFrameCount( *m_frames ) != 0 );
 
     const auto scale = GetScale();
-    auto Height = 50 * scale * m_vd.flFrameHeightScale;
+    auto Height = m_vd.flFrameHeight;
 
     const uint64_t MaxFrameTime = m_vd.frameOverviewMaxTimeMS * 1000 * 1000;  // 50ms
 
@@ -78,12 +78,10 @@ void View::DrawFrames()
     const auto prevScale = m_vd.frameScale;
 
     float heightDiff = UpdateAndDrawResizeBar( m_framesResize );
-    if ( heightDiff )
+    if( fabs( heightDiff ) > 0.001f )
     {
-        float newHeight = Height + heightDiff;
-        const auto heightNoViewScale = 50 * scale;
-        const auto newScale = newHeight / heightNoViewScale;
-        m_vd.flFrameHeightScale = newScale;
+        m_vd.flFrameHeight += heightDiff;
+        m_vd.flFrameHeight = std::clamp( m_vd.flFrameHeight, m_framesResize.minHeight, m_framesResize.maxHeight );
     }
 
     if( hover )

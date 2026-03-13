@@ -249,8 +249,9 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
     for( int i=0; i<cpuCnt; i++ )
     {
         DrawLine( draw, dpos + ImVec2( 0, offset+sty ), dpos + ImVec2( w, offset+sty ), 0x22DD88DD );
-        auto tt = m_worker.GetThreadTopology( i );
-        if( !ctxDraw[i].empty() && wpos.y + offset + sty >= yMin && wpos.y + offset <= yMax )
+        auto tt = m_worker.GetThreadTopology( CpuThreadId{ (uint32_t)i } );
+
+        if( ( i < ctxDraw.size() ) && !ctxDraw[i].empty() && wpos.y + offset + sty >= yMin && wpos.y + offset <= yMax )
         {
             auto& cs = cpuData[i].cs;
             for( auto& v : ctxDraw[i] )
@@ -275,9 +276,9 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
                             ImGui::SameLine();
                             ImGui::Spacing();
                             ImGui::SameLine();
-                            TextFocused( "Package:", RealToString( tt->package ) );
+                            TextFocused( "Package:", RealToString( tt->package.val ) );
                             ImGui::SameLine();
-                            TextFocused( "Core:", RealToString( tt->core ) );
+                            TextFocused( "Core:", RealToString( tt->core.val ) );
                         }
                         TextFocused( "Context switch regions:", RealToString( v.num ) );
                         ImGui::Separator();
@@ -364,9 +365,9 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
                             ImGui::SameLine();
                             ImGui::Spacing();
                             ImGui::SameLine();
-                            TextFocused( "Package:", RealToString( tt->package ) );
+                            TextFocused( "Package:", RealToString( tt->package.val ) );
                             ImGui::SameLine();
-                            TextFocused( "Core:", RealToString( tt->core ) );
+                            TextFocused( "Core:", RealToString( tt->core.val ) );
                         }
                         if( local )
                         {
@@ -522,9 +523,44 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
                 ImGui::SameLine();
                 ImGui::Spacing();
                 ImGui::SameLine();
-                TextFocused( "Package:", RealToString( tt->package ) );
+                TextFocused( "Package:", RealToString( tt->package.val ) );
                 ImGui::SameLine();
-                TextFocused( "Core:", RealToString( tt->core ) );
+                TextFocused( "Core:", RealToString( tt->core.val ) );
+
+                std::vector<const Worker::CpuCacheInfo*> caches;
+                m_worker.GetCachesForCore( tt, caches );
+                if ( !caches.empty() )
+                {
+                    static const ImVec4 s_CacheCols[] =
+                    {
+                        (ImVec4)ImColor( 1.0f, 1.0f, 1.0f ),
+                        (ImVec4)ImColor( 0.6f, 1.0f, 0.6f ),
+                        (ImVec4)ImColor( 1.0f, 0.6f, 0.25f ),
+                        (ImVec4)ImColor( 1.0f, 0.34f, 0.34f ),
+                        (ImVec4)ImColor( 1.0f, 0.0f, 0.0f ),
+                    };
+
+                    static const char s_CacheTypePrefix[] =
+                    {
+                        'x',
+                        'U',
+                        'I',
+                        'D',
+                    };
+
+                    TextDisabledUnformatted( "Caches:" );
+                    for ( const Worker::CpuCacheInfo* cache : caches )
+                    {
+                        const int levelIndex = std::min( (int)cache->level, IM_ARRAYSIZE( s_CacheCols ) );
+                        const int typeIndex = std::min( (int)cache->type, IM_ARRAYSIZE( s_CacheTypePrefix ) );
+                        ImGui::TextColored( s_CacheCols[levelIndex]
+                                            , "   L%u %c$ %s"
+                                            , cache->level
+                                            , s_CacheTypePrefix[ typeIndex ]
+                                            , MemSizeToString( cache->size )
+                        );
+                    }
+                }
             }
             TextFocused( "Context switch regions:", RealToString( cpuData[i].cs.size() ) );
             ImGui::EndTooltip();
@@ -540,7 +576,7 @@ bool View::DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDr
 		offset = origOffset;
 		for ( int i = 0; i < cpuCnt; i++ )
 		{
-			if ( !ctxDraw[ i ].empty() && wpos.y + offset + sty >= yMin && wpos.y + offset <= yMax )
+			if ( ( i < ctxDraw.size() ) && !ctxDraw[ i ].empty() && wpos.y + offset + sty >= yMin && wpos.y + offset <= yMax )
 			{
 				auto &cs = cpuData[ i ].cs;
 				for ( auto &v : ctxDraw[ i ] )

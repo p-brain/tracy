@@ -8,7 +8,6 @@
 #include <time.h>
 
 #include "tracy_concurrentqueue.h"
-#include "tracy_SPSCQueue.h"
 #include "TracyCallstack.hpp"
 #include "TracyKCore.hpp"
 #include "TracySysPower.hpp"
@@ -71,10 +70,11 @@ TRACY_API bool IsProfilerStarted();
 // This process is now manual by calling the function below or adding '-tracy_enable' 
 // to the command line
 TRACY_API void RequestListenAndBroadcast();
+TRACY_API void ShutdownAndWait();
 
 class GpuCtx;
 class Profiler;
-class Socket;
+class ListenSocket;
 class UdpBroadcast;
 
 struct GpuCtxWrapper
@@ -172,7 +172,10 @@ struct LuaZoneState
 typedef void(*ParameterCallback)( void* data, uint32_t idx, int32_t val );
 typedef char*(*SourceContentsCallback)( void* data, const char* filename, size_t& size );
 
-struct LockItemContainer;
+class ProfilerSyncState;
+
+class UiConnection;
+
 
 class Profiler
 {
@@ -196,7 +199,7 @@ class Profiler
 
     struct SymbolQueueItem
     {
-        uint64_t connectionId;
+        uint32_t connectionId;
         SymbolQueueItemType type;
         uint64_t ptr;
         uint64_t extra;
@@ -204,12 +207,152 @@ class Profiler
     };
 
 public:
+    struct FrameInfo
+    {
+        uint64_t id;
+        int64_t time;
+    };
+
+    struct FrameHistory
+    {
+        FrameInfo first;
+        FrameInfo last;
+        size_t count;
+        size_t size;
+        FrameInfo* pBuffer;
+    };
+
+    struct ProcessStats
+    {
+        FrameInfo firstFrame;
+        FrameInfo lastFrame;
+
+        int64_t cpuBeg;
+        int64_t cpuEnd;
+        int64_t gpuBeg;
+        int64_t gpuEnd;
+    };
+
+    struct ProcessBuffer
+    {
+        size_t size;
+        size_t commitLimit;
+        size_t wrapLimit;
+
+        char* pBuffer;
+        size_t offset;
+        size_t start;
+    };
+
+
+    class IBufferHandler
+    {
+    public:
+        IBufferHandler()
+        {
+            memset( &m_buffer, 0, sizeof( m_buffer ) );
+        }
+
+        virtual ~IBufferHandler() {}
+        virtual bool Commit( size_t pendingSize ) = 0;
+
+        ProcessBuffer m_buffer;
+        ProcessStats m_stats;
+    };
+
+    class IWorker
+    {
+    public:
+        virtual ~IWorker() {}
+
+        virtual void Connection( Profiler& rProfiler, const WelcomeMessage& rWelcome ) = 0;
+    };
+
+
+    enum Options : uint32_t
+    {
+        Options_None                = 0,
+        Options_ContextSwitches     = (1 << 0),
+        Options_Sampling            = (1 << 1),
+        Options_HardwareSampling    = (1 << 2),
+        Options_HardwareEvents      = (1 << 3),
+        Options_Vsync               = (1 << 4),
+        Options_Background          = (1 << 5),
+    };
+
     Profiler();
     ~Profiler();
 
-	void RequestListenAndBroadcast() { m_listenAndBroadcastRequested.store( true, std::memory_order_relaxed ); }
+    static bool ShouldExit();
 
-    void SpawnWorkerThreads();
+    tracy_force_inline bool IsConnected() const
+    {
+        return ( m_connectionId.load( std::memory_order_acquire ) != 0 );
+    }
+
+    tracy_force_inline bool IsConnectedToUI() const
+    {
+        uint32_t connId = ConnectionId();
+        return ( ( connId & 0x01 ) != 0 );
+    }
+
+    tracy_force_inline bool IsConnectedTo( uint32_t connectionId ) const
+    {
+        uint32_t connId = ConnectionId();
+        return ( ( connId != 0 ) && ( connId == connectionId ) );
+    }
+
+    uint32_t GetOptions() const;
+    void ClearOptions( uint32_t clearOpts );
+    void RequestListenAndBroadcast() { m_listenAndBroadcastRequested.store( true, std::memory_order_relaxed ); }
+
+    void SpawnWorkerThreads( IWorker* pExtWorker, DbgHelpLoaderFunc* pDbgHelpLoader );
+    void StopWorkerThreads();
+
+    uint32_t Connect();
+    void Disconnect();
+
+    void DumpBegin();
+    void DumpEnd();
+
+    IBufferHandler* SetBufferHandler( IBufferHandler *pHandler );
+
+    enum SyncMode
+    {
+        SyncMode_None  = 0,
+        SyncMode_Tracy = ( 1 << 0 ),
+        SyncMode_Sys   = ( 1 << 1 ),
+    };
+
+    bool Synchronize( uint32_t syncMode = SyncMode_None | SyncMode_Tracy );
+    bool ProcessServerQueries( const ServerQueryPacket *pQueries, size_t count );
+    void PreConnect( const char *broadcastMsg );
+    void PostConnect();
+    void ConnectionUpdate();
+
+    struct DequeueStats
+    {
+        ProcessStats stats;
+        FrameHistory *pFrameHistory;
+    };
+
+    enum class DequeueStatus { DataDequeued, ConnectionLost, QueueEmpty };
+    DequeueStatus ProcessData();
+    DequeueStatus ProcessDataSerial( DequeueStats& rStats );
+    DequeueStatus ProcessDataThread( DequeueStats& rStats );
+    DequeueStatus ProcessDataSys( DequeueStats& rStats );
+    DequeueStatus ProcessDataSymbols();
+    bool CommitPendingData();
+
+    tracy_force_inline uint64_t GetFrameCount() const
+    {
+        return m_frameCount.load( std::memory_order_relaxed );
+    }
+
+    tracy_force_inline int64_t GetFrameTime() const
+    {
+        return m_frameTime.load();
+    }
 
     static tracy_force_inline int64_t GetTime()
     {
@@ -302,11 +445,16 @@ public:
 
     static tracy_force_inline void SendFrameMark( const char* name )
     {
-        uint64_t frameTime = GetTime();
+        uint64_t frameId = 0;
+        int64_t frameTime = GetTime();
         if ( !name )
         {
-            GetProfiler().m_frameCount.fetch_add( 1, std::memory_order_relaxed );
+            frameId = GetProfiler().m_frameCount.fetch_add( 1, std::memory_order_relaxed );
             GetProfiler().m_frameTime = frameTime;
+        }
+        else
+        {
+            frameId = GetProfiler().GetFrameCount();
         }
 
 #ifdef TRACY_ON_DEMAND
@@ -316,6 +464,7 @@ public:
         MemWrite( &item->hdr.type, QueueType::FrameMarkMsg );
         MemWrite( &item->frameMark.time, frameTime );
         MemWrite( &item->frameMark.name, uint64_t( name ) );
+        MemWrite( &item->frameMark.id, frameId );
         QueueSerialFinish();
     }
 
@@ -722,24 +871,18 @@ public:
     void SendCallstack( int depth, const char* skipBefore );
     static void CutCallstack( void* callstack, const char* skipBefore );
 
-    static bool ShouldExit();
-
-    tracy_force_inline bool IsConnected() const
-    {
-        return m_isConnected.load( std::memory_order_acquire );
-    }
-
     tracy_force_inline void SetProgramName( const char* name )
     {
         m_programNameLock.lock();
         m_programName = name;
+        m_programNameLen = ( m_programName ? strlen( m_programName ) : 0 );
         m_programNameLock.unlock();
     }
 
-	tracy_force_inline uint32_t ListenPort() const
-	{
-		return m_listenPort;
-	}
+    tracy_force_inline uint32_t ListenPort() const
+    {
+        return m_listenPort;
+    }
 
     void LockAnnounce( volatile void* pLockId, const SourceLocationData* pSrcloc, const char* name, size_t len );
     void LockTerminate( volatile void* pLockId );
@@ -751,7 +894,7 @@ public:
     void LockReleased( volatile void* pLockId, const char* file, int line );
 
 #ifdef TRACY_ON_DEMAND
-    tracy_force_inline uint64_t ConnectionId() const
+    tracy_force_inline uint32_t ConnectionId() const
     {
         return m_connectionId.load( std::memory_order_acquire );
     }
@@ -764,7 +907,7 @@ public:
         m_deferredLock.unlock();
     }
 #else
-    tracy_force_inline uint64_t ConnectionId() const
+    tracy_force_inline uint32_t ConnectionId() const
     {
         return 0;
     }
@@ -826,9 +969,61 @@ public:
         return uint64_t( ptr );
     }
 
+#ifdef TRACY_HAS_SYSTEM_TRACING
+    static bool IsSysTraceRunning();
+
+    static tracy_force_inline QueueItem* QueueSys( QueueType type )
+    {
+        auto& p = GetProfiler();
+        p.m_sysLock.lock();
+        QueueItem* item = p.m_sysQueue.prepare_next();
+        MemWrite( &item->hdr.type, type );
+        return item;
+    }
+
+    static tracy_force_inline void QueueSysFinish()
+    {
+        auto& p = GetProfiler();
+        p.m_sysQueue.commit_next();
+        p.m_sysLock.unlock();
+    }
+
+#else // ifdef TRACY_HAS_SYSTEM_TRACING
+    static bool IsSysTraceRunning() { return false; }
+#endif // ifdef TRACY_HAS_SYSTEM_TRACING
+
+#if defined(TRACY_NEEDS_SYMBOL_WORKER)
+    static bool IsSymbolResolutionRunning();
+#else
+    static bool IsSymbolResolutionRunning() { return false; }
+#endif
+
 private:
-    enum class DequeueStatus { DataDequeued, ConnectionLost, QueueEmpty };
+    const WelcomeMessage& WaitForStartup();
+    void WaitForShutdown( ListenSocket &listen );
+    bool WaitForActivation();
+
+    bool StartListening( ListenSocket& listen );
+
+    void WorkerLoopBegin();
+    void WorkerLoopEnd();
+
+    bool ConnectToUi(ListenSocket& listen, bool block);
+    bool InitiateUiConnection( HandshakeStatus handshake );
+    bool ProcessServerQuery();
+
+    bool HandleKeepAlive( DequeueStatus status, int& keepAlive );
+
     enum class ThreadCtxStatus { Same, Changed, ConnectionLost };
+
+    struct RefTimes
+    {
+        uint32_t m_threadCtx;
+        int64_t m_refTimeThread;
+        int64_t m_refTimeSerial;
+        int64_t m_refTimeGpu;
+        int64_t m_refTimeCtx;
+    };
 
     static void LaunchWorker( void* ptr ) { ((Profiler*)ptr)->Worker(); }
     void Worker();
@@ -841,43 +1036,29 @@ private:
 #if defined(TRACY_NEEDS_SYMBOL_WORKER)
     static void LaunchSymbolWorker( void* ptr ) { ((Profiler*)ptr)->SymbolWorker(); }
     void SymbolWorker();
+    void ProcessSymbolQueueItems( const SymbolQueueItem* symbolRequests, size_t count );
     void HandleSymbolQueueItem( const SymbolQueueItem& si );
 #endif
 
     void InstallCrashHandler();
     void RemoveCrashHandler();
-    
+
+    void ClearConnectionData();
     void ClearQueues( tracy::moodycamel::ConsumerToken& token );
     void ClearSerial();
-    DequeueStatus Dequeue( tracy::moodycamel::ConsumerToken& token );
+    void ClearSys();
+    void ClearSymbol();
+    DequeueStatus Dequeue( tracy::moodycamel::ConsumerToken& token, DequeueStats& rStats );
     DequeueStatus DequeueContextSwitches( tracy::moodycamel::ConsumerToken& token, int64_t& timeStop );
-    DequeueStatus DequeueSerial();
-    ThreadCtxStatus ThreadCtxCheck( uint32_t threadId );
-    bool CommitData();
+    DequeueStatus DequeueSerial( DequeueStats& rStats );
+    DequeueStatus DequeueSys( DequeueStats& rStats );
+    DequeueStatus DequeueSymbols();
+    ThreadCtxStatus ThreadCtxCheck( uint32_t threadId, RefTimes& rRefTimes );
+    bool CommitData( size_t pendingSize );
 
-    tracy_force_inline bool AppendData( const void* data, size_t len )
-    {
-        const auto ret = NeedDataSize( len );
-        AppendDataUnsafe( data, len );
-        return ret;
-    }
-
-    tracy_force_inline bool NeedDataSize( size_t len )
-    {
-        assert( len <= TargetFrameSize );
-        bool ret = true;
-        if( m_bufferOffset - m_bufferStart + (int)len > TargetFrameSize )
-        {
-            ret = CommitData();
-        }
-        return ret;
-    }
-
-    tracy_force_inline void AppendDataUnsafe( const void* data, size_t len )
-    {
-        memcpy( m_buffer + m_bufferOffset, data, len );
-        m_bufferOffset += int( len );
-    }
+    bool AppendData( const QueueItem *item, size_t len );
+    bool NeedDataSize( size_t len );
+    void AppendDataUnsafe( const void *data, size_t len );
 
     bool SendData( const char* data, size_t len );
     void SendLongString( uint64_t ptr, const char* str, size_t len, QueueType type );
@@ -894,6 +1075,7 @@ private:
     void QueueSourceCodeQuery( uint32_t id );
 
     bool HandleServerQuery();
+    bool HandleServerQuery( const ServerQueryPacket& payload );
     void HandleDisconnect();
     void HandleParameter( uint64_t payload );
     void HandleSymbolCodeQuery( uint64_t symbol, uint32_t size );
@@ -971,31 +1153,53 @@ private:
     uint64_t m_resolution;
     uint64_t m_delay;
     std::atomic<int64_t> m_timeBegin;
-	std::atomic<bool> m_listenAndBroadcastRequested;
+    std::atomic<bool> m_listenAndBroadcastRequested;
     uint32_t m_mainThread;
     uint64_t m_epoch, m_exectime;
     std::atomic<bool> m_shutdown;
     std::atomic<bool> m_shutdownManual;
     std::atomic<bool> m_shutdownFinished;
-    Socket* m_sock;
-    UdpBroadcast* m_broadcast;
+
+    friend class ProfilerSyncState;
+    ProfilerSyncState* m_pSyncState;
+
+    WelcomeMessage m_welcome;
+
+    void StartBroadcast( uint16_t broadcastPort, uint32_t dataPort );
+    void StopBroadcast();
+    void UpdateBroadcast( bool noCheckSend = false );
+    void SetBroadcastMessage( const char* message );
+
+    bool StartListening(ListenSocket& listen, uint32_t& dataPort, bool dataPortSearch, uint16_t broadcastPort);
+    bool SwitchThreadCtx( uint32_t threadId, RefTimes& refTimes );
+    bool SynchronizeTracyNoLock( const RefTimes& syncRefTimes, RefTimes& refTimes );
+    bool SynchronizeSysNoLock( const RefTimes& syncRefTimes, RefTimes& refTimes );
+
+    struct Broadcaster
+    {
+        UdpBroadcast *broadcast;
+        int64_t lastBroadcast;
+        bool isActive;
+        const char *broadcastAddr;
+        uint16_t broadcastPort;
+        BroadcastMessage broadcastMsg;
+        int broadcastLen;
+        uint64_t epoch;
+    };
+
+    UiConnection* m_pUiConnection;
+
+    Broadcaster m_broadcaster;
     bool m_noExit;
     uint32_t m_userPort;
     std::atomic<uint32_t> m_zoneId;
     int64_t m_samplingPeriod;
 
-    uint32_t m_threadCtx;
-    int64_t m_refTimeThread;
-    int64_t m_refTimeSerial;
-    int64_t m_refTimeCtx;
-    int64_t m_refTimeGpu;
+    RefTimes m_refTimes;
 
-    void* m_stream;     // LZ4_stream_t*
-    char* m_buffer;
-    int m_bufferOffset;
-    int m_bufferStart;
-
-    char* m_lz4Buf;
+    void UpdateSyncInfo( QueueType type, QueueItem *item, const RefTimes &refTimes );
+    IBufferHandler* m_pBufferHandler;
+    IWorker *m_pExtWorker;
 
     FastVector<QueueItem> m_serialQueue, m_serialDequeue;
     TracyMutex m_serialLock;
@@ -1005,35 +1209,57 @@ private:
     TracyMutex m_fiLock;
 #endif
 
+    tracy_force_inline QueueItem* QueueSymbol( QueueType type )
+    {
+        m_symbolLock.lock();
+        QueueItem* item = m_symbolQueue.prepare_next();
+        MemWrite( &item->hdr.type, type );
+        return item;
+    }
+
+    tracy_force_inline void QueueSymbolFinish()
+    {
+        m_symbolQueue.commit_next();
+        m_symbolLock.unlock();
+    }
+
+    TracyMutex m_symbolLock;
+    FastVector<QueueItem> m_symbolQueue, m_symbolDequeue;
+
 #if defined(TRACY_NEEDS_SYMBOL_WORKER)
-    SPSCQueue<SymbolQueueItem> m_symbolQueue;
-#endif
+    // NOTE: Don't use SPSCQueue: If we are requesting a large amount of symbols and the queue is full
+    // the profiler thread will stall (waiting for room in the queue, due to slow symbol load times).
+    // And since we won't be pumping the data queues at that time, they will grow unbounded in memory.
+    // Simply use a lock and a normal vector instead which really is plenty fast for this use case.
+    TracyMutex m_requestSymbolLock;
+    FastVector<SymbolQueueItem> m_symbolRequestQueue;
+    std::atomic< bool > m_cancelSymbolProcessing;
+#endif // if defined(TRACY_NEEDS_SYMBOL_WORKER)
+
+#ifdef TRACY_HAS_SYSTEM_TRACING
+    TracyMutex m_sysLock;
+    FastVector<QueueItem> m_sysQueue, m_sysDequeue;
+#endif // ifdef TRACY_HAS_SYSTEM_TRACING
 
     std::atomic<uint64_t> m_frameCount;
-public:
-    std::atomic<uint64_t> m_frameTime;
-private:
-    std::atomic<bool> m_isConnected;
-	uint32_t m_listenPort;
-#ifdef TRACY_ON_DEMAND
-    std::atomic<uint64_t> m_connectionId;
+    std::atomic<int64_t> m_frameTime;
 
+    uint32_t m_options;
+
+    std::atomic<uint32_t> m_connectionId;
+    uint32_t m_nextConnectionId;
+
+    uint32_t m_listenPort;
+#ifdef TRACY_ON_DEMAND
     TracyMutex m_deferredLock;
     FastVector<QueueItem> m_deferredQueue;
 #endif
 
-    LockItemContainer *m_lockItems;
-    void LockItemContainerNew();
-    void LockItemContainerDestroy();
-    uint32_t GetLockConnectionId() const;
-
-#ifdef TRACY_HAS_SYSTIME
     void ProcessSysTime();
 
+#ifdef TRACY_HAS_SYSTIME
     SysTime m_sysTime;
     uint64_t m_sysTimeLast = 0;
-#else
-    void ProcessSysTime() {}
 #endif
 
 #ifdef TRACY_HAS_SYSPOWER
@@ -1063,6 +1289,7 @@ private:
     bool m_crashHandlerInstalled;
 
     const char* m_programName;
+    size_t m_programNameLen;
     TracyMutex m_programNameLock;
 };
 

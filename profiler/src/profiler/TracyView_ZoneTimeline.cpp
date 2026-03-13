@@ -23,7 +23,7 @@ static tracy_force_inline uint32_t MixGhostColor( uint32_t c0, uint32_t c1 )
         ( ( ( ( ( c0 & 0x000000FF )       ) + 3 * ( ( c1 & 0x000000FF )       ) ) >> 2 )       );
 }
 
-void View::DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, int& offset, int depth )
+void View::DrawCpuTrack( const TimelineContext &ctx, uint64_t coreIndex, const std::vector<TimelineDraw> &draw, const std::vector<ContextSwitchDraw> &ctxDraw, const HwCounterDraw &hwCounterDraw, int &offset, int depth )
 {
     const auto& wpos = ctx.wpos;
     const auto ty = ctx.ty;
@@ -38,6 +38,14 @@ void View::DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const s
         offset += round( ostep * 0.75f );
     }
 
+    const auto hasHwCounter = m_vd.drawHwCounter && !hwCounterDraw.m_items.empty();
+    const auto hwCounterHeight = ( m_vd.hwCounterDrawMode == ViewData::EHwCounterDrawMode::TextMode ) ? ctx.ty : floor( 30.f * GetScale() );
+    const auto hwCounterOffset = offset;
+    if ( hasHwCounter )
+    {
+        offset += hwCounterHeight + 3;
+    }
+
     const auto yPos = wpos.y + offset;
     if( !draw.empty() && yPos <= yMax && yPos + ostep * depth >= yMin )
     {
@@ -49,9 +57,14 @@ void View::DrawCpuTrack( const TimelineContext& ctx, uint64_t coreIndex, const s
     {
         DrawContextSwitchList( ctx, coreIndex, ctxDraw, ctxOffset, offset, false );
     }
+
+    if ( hasHwCounter )
+    {
+        DrawHwCounterList( ctx, hwCounterDraw, hwCounterOffset, hwCounterHeight, offset );
+    }
 }
 
-void View::DrawThread( const TimelineContext &ctx, const ThreadData &thread, const std::vector<TimelineDraw> &draw, const std::vector<ContextSwitchDraw> &ctxDraw, const std::vector<SamplesDraw> &samplesDraw, const std::vector<std::unique_ptr<LockDraw>> &lockDraw, int &offset, int depth, bool _hasCtxSwitches, bool _hasSamples )
+void View::DrawThread( const TimelineContext &ctx, const ThreadData &thread, const std::vector<TimelineDraw> &draw, const std::vector<ContextSwitchDraw> &ctxDraw, const std::vector<SamplesDraw> &samplesDraw, const std::vector<std::unique_ptr<LockDraw>> &lockDraw, const HwCounterDraw &hwCounterDraw, int &offset, int depth, bool _hasCtxSwitches, bool _hasSamples, bool _hasHwCounter )
 {
     const auto& wpos = ctx.wpos;
     const auto ty = ctx.ty;
@@ -64,6 +77,7 @@ void View::DrawThread( const TimelineContext &ctx, const ThreadData &thread, con
     const auto sampleOffset = offset;
     const auto hasSamples = m_vd.drawSamples && _hasSamples;
     const auto hasCtxSwitch = m_vd.drawContextSwitches && _hasCtxSwitches;
+    const auto hasHwCounter = m_vd.drawHwCounter && _hasHwCounter;
 
     if( hasSamples )
     {
@@ -83,6 +97,13 @@ void View::DrawThread( const TimelineContext &ctx, const ThreadData &thread, con
         offset += round( ostep * 0.75f );
     }
 
+    const auto hwCounterHeight = ( m_vd.hwCounterDrawMode == ViewData::EHwCounterDrawMode::TextMode ) ? ctx.ty : floor( 30.f * GetScale() );
+    const auto hwCounterOffset = offset;
+    if ( hasHwCounter )
+    {
+        offset += hwCounterHeight + 3;
+    }
+
     const auto yPos = wpos.y + offset;
     if( !draw.empty() && yPos <= yMax && yPos + ostep * depth >= yMin )
     {
@@ -99,6 +120,11 @@ void View::DrawThread( const TimelineContext &ctx, const ThreadData &thread, con
     if( hasSamples && !samplesDraw.empty() )
     {
         DrawSampleList( ctx, samplesDraw, thread.samples, sampleOffset );
+    }
+
+    if ( hasHwCounter && !hwCounterDraw.m_items.empty() )
+    {
+        DrawHwCounterList( ctx, hwCounterDraw, hwCounterOffset, hwCounterHeight, offset );
     }
 
     if( m_vd.drawLocks )

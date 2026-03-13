@@ -13,8 +13,21 @@ void EventDebug( const QueueItem& ev )
     static FILE* f = fopen( "eventdebug.txt", "wb" );
     switch( ev.hdr.type )
     {
+    case QueueType::ConnectionSyncBegin:
+        fprintf( f, "ev %i (ConnectionSyncBegin)\n", ev.hdr.idx );
+        break;
+    case QueueType::ConnectionSyncEnd:
+        fprintf( f, "ev %i (ConnectionSyncEnd)\n", ev.hdr.idx );
+        break;
+
     case QueueType::SyncValidation:
         fprintf( f, "ev %i (SyncValidation)\n", ev.hdr.idx );
+        break;
+    case QueueType::SyncValidationThread:
+        fprintf( f, "ev %i (SyncValidationThread)\n", ev.hdr.idx );
+        break;
+    case QueueType::SyncValidationContext:
+        fprintf( f, "ev %i (SyncValidationContext)\n", ev.hdr.idx );
         break;
     case QueueType::ZoneText:
         fprintf( f, "ev %i (ZoneText)\n", ev.hdr.idx );
@@ -183,6 +196,15 @@ void EventDebug( const QueueItem& ev )
     case QueueType::SymbolInformation:
         fprintf( f, "ev %i (SymbolInformation)\n", ev.hdr.idx );
         break;
+    case QueueType::ExternalNameMetadata:
+        fprintf( f, "ev %i (ExternalNameMetadata)\n", ev.hdr.idx );
+        break;
+    case QueueType::SymbolCodeMetadata:
+        fprintf( f, "ev %i (SymbolCodeMetadata)\n", ev.hdr.idx );
+        break;
+    case QueueType::SourceCodeMetadata:
+        fprintf( f, "ev %i (SourceCodeMetadata)\n", ev.hdr.idx );
+        break;
     case QueueType::FiberEnter:
         fprintf( f, "ev %i (FiberEnter)\n", ev.hdr.idx );
         fprintf( f, "\ttime   = %" PRIi64 "\n", ev.fiberEnter.time );
@@ -235,6 +257,9 @@ void EventDebug( const QueueItem& ev )
     case QueueType::FrameMarkMsgEnd:
         fprintf( f, "ev %i (FrameMarkMsgEnd)\n", ev.hdr.idx );
         break;
+    case QueueType::FrameVsync:
+        fprintf( f, "ev %i (FrameVsync)\n", ev.hdr.idx );
+        break;
     case QueueType::SourceLocation:
         fprintf( f, "ev %i (SourceLocation)\n", ev.hdr.idx );
         break;
@@ -246,6 +271,9 @@ void EventDebug( const QueueItem& ev )
         break;
     case QueueType::LockMark:
         fprintf( f, "ev %i (LockMark)\n", ev.hdr.idx );
+        break;
+    case QueueType::LockMarkFileLine:
+        fprintf( f, "ev %i (LockMarkFileLine)\n", ev.hdr.idx );
         break;
     case QueueType::MessageLiteral:
         fprintf( f, "ev %i (MessageLiteral)\n", ev.hdr.idx );
@@ -270,6 +298,9 @@ void EventDebug( const QueueItem& ev )
         fprintf( f, "\ttime    = %" PRIi64 "\n", ev.sysTime.time );
         fprintf( f, "\tsysTime = %f\n", ev.sysTime.sysTime );
         break;
+    case QueueType::SysPowerReport:
+        fprintf( f, "ev %i (SysPowerReport)\n", ev.hdr.idx );
+        break;
     case QueueType::TidToPid:
         fprintf( f, "ev %i (TidToPid)\n", ev.hdr.idx );
         break;
@@ -290,6 +321,12 @@ void EventDebug( const QueueItem& ev )
         break;
     case QueueType::HwSampleBranchMiss:
         fprintf( f, "ev %i (HwSampleBranchMiss)\n", ev.hdr.idx );
+        break;
+    case QueueType::HwCounter:
+        fprintf( f, "ev %i (HwCounter)\n", ev.hdr.idx );
+        break;
+    case QueueType::HwCounterConfig:
+        fprintf( f, "ev %i (HwCounterConfig)\n", ev.hdr.idx );
         break;
     case QueueType::PlotConfig:
         fprintf( f, "ev %i (PlotConfig)\n", ev.hdr.idx );
@@ -312,6 +349,9 @@ void EventDebug( const QueueItem& ev )
         fprintf( f, "\tcore    = %" PRIu32 "\n", ev.cpuTopology.core );
         fprintf( f, "\tthread  = %" PRIu32 "\n", ev.cpuTopology.thread );
         break;
+    case QueueType::CacheTopology:
+        fprintf( f, "ev %i (CacheTopology)\n", ev.hdr.idx );
+        break;
     case QueueType::SingleStringData:
         fprintf( f, "ev %i (SingleStringData)\n", ev.hdr.idx );
         break;
@@ -320,6 +360,9 @@ void EventDebug( const QueueItem& ev )
         break;
     case QueueType::MemNamePayload:
         fprintf( f, "ev %i (MemNamePayload)\n", ev.hdr.idx );
+        break;
+    case QueueType::ThreadGroupHint:
+        fprintf( f, "ev %i (ThreadGroupHint)\n", ev.hdr.idx );
         break;
     case QueueType::StringData:
         fprintf( f, "ev %i (StringData)\n", ev.hdr.idx );

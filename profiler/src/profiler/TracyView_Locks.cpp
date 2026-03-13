@@ -140,10 +140,10 @@ void View::DrawLockHeader( uint32_t id, bool merged, const LockMap& lockmap, con
                 ImGui::TextDisabled( "(%.2f%% of lock lifetime)", activity / double( lockLen ) * 100 );
                 ImGui::Separator();
                 TextFocused( "Announce time:", TimeToString( timeAnnounce ) );
-				if ( lockmap.timeTerminate >= lockmap.timeAnnounce )
-				{
-					TextFocused( "Terminate time:", TimeToString( timeTerminate ) );
-				}
+                if ( lockmap.timeTerminate >= lockmap.timeAnnounce )
+                {
+                    TextFocused( "Terminate time:", TimeToString( timeTerminate ) );
+                }
                 TextFocused( "Lifetime:", TimeToString( lockLen ) );
                 ImGui::SameLine();
                 ImGui::TextDisabled( "(%.2f%% of trace time)", lockLen / double( traceLen ) * 100 );

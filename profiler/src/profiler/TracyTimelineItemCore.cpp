@@ -19,6 +19,7 @@ namespace tracy
 
 constexpr float MinVisSize = 3;
 constexpr float MinCtxSize = 4;
+constexpr float MinHwCounterVisSize = 3;
 
 
 TimelineItemCore::TimelineItemCore( View& view, Worker& worker, const CpuData* cpuData )
@@ -30,10 +31,10 @@ TimelineItemCore::TimelineItemCore( View& view, Worker& worker, const CpuData* c
     assert( index >= 0 );
     uint32_t cpuThread = (uint32_t)index;
 
-    const Worker::CpuThreadTopology* threadTopo = m_worker.GetThreadTopology( cpuThread );
-    m_coreInfo.package = threadTopo->package;
-    m_coreInfo.core = threadTopo->core;
-    m_coreInfo.coreIndex = cpuThread;
+    const Worker::CpuThreadTopology *threadTopo = m_worker.GetThreadTopology( CpuThreadId{ cpuThread } );
+    m_coreInfo.package = threadTopo ? threadTopo->package : CpuPackageId{ 0 };
+    m_coreInfo.core = threadTopo ? threadTopo->core : CpuCoreId{ 0 };
+    m_coreInfo.cpuThread = CpuThreadId{ cpuThread };
     m_coreInfo.cpuData = cpuData;
 
     m_Name = m_worker.GetFormattedCpuName( cpuThread );
@@ -52,8 +53,8 @@ TimelineItemCore::TimelineItemCore( View& view, Worker& worker, const CpuData* c
     else
     {
         m_trackUiData.settings.shouldOverride = false;
-        m_trackUiData.settings.stackCollapseMode = view.GetViewData().coreCollapseMode;
-        m_trackUiData.settings.stackCollapseClamp = view.GetViewData().coreCollapseClamp;
+        m_trackUiData.settings.stackCollapseMode = vd.coreCollapseMode;
+        m_trackUiData.settings.stackCollapseClamp = vd.coreCollapseClamp;
     }
 
     m_trackUiData.preventScroll = 0;
@@ -105,7 +106,7 @@ int64_t TimelineItemCore::RangeEnd() const
 void TimelineItemCore::HeaderTooltip( const char* label ) const
 {
     ImGui::BeginTooltip();
-    SmallColorBox( GetThreadColor(  m_coreInfo.coreIndex, 0, m_view.GetViewData().dynamicColors ) );
+    SmallColorBox( GetThreadColor(  m_coreInfo.cpuThread.val, 0, m_view.GetViewData().dynamicColors ) );
     ImGui::SameLine();
     ImGui::TextUnformatted( label );
 
@@ -158,7 +159,7 @@ bool TimelineItemCore::DrawContents( const TimelineContext& ctx, int& offset )
         depth = std::min(stackCollapseClamp, m_maxDepth);
     }
 
-    m_view.DrawCpuTrack( ctx, m_coreInfo.coreIndex, m_draw, m_ctxDraw, offset, depth);
+    m_view.DrawCpuTrack( ctx, m_coreInfo.cpuThread.val, m_draw, m_ctxDraw, m_hwCounterDraw, offset, depth);
     return true;
 }
 
@@ -171,8 +172,8 @@ bool TimelineItemCore::PreventScrolling() const
 
 void TimelineItemCore::DrawUiControls( const TimelineContext &ctx, int start, int &offset,float xOffset )
 {
-    ViewData::Track& rCoreSettings = m_view.GetViewData().cores[ m_coreInfo.coreIndex ];
-    m_view.DrawTrackUiControls( ctx, HeaderLabel(), m_maxDepth, m_depth, m_trackUiData, rCoreSettings.ui, start, offset, xOffset );
+    ViewData::Track& rCoreSettings = m_view.GetViewData().cores[ m_coreInfo.cpuThread.val ];
+    m_view.DrawTrackUiControls( ctx, HeaderLabel(), m_maxDepth, m_depth, m_trackUiData, rCoreSettings, start, offset, xOffset );
 }
 
 
@@ -180,6 +181,7 @@ void TimelineItemCore::DrawFinished()
 {
     m_draw.clear();
     m_ctxDraw.clear();
+    m_hwCounterDraw.Reset();
 
     if ( m_keepActive && m_cpuZoneBuffer.HasMoreDataToProcess() )
     {
@@ -192,6 +194,7 @@ void TimelineItemCore::Preprocess( const TimelineContext& ctx, TaskDispatch& td,
 {
     assert( m_draw.empty() );
     assert( m_ctxDraw.empty() );
+    assert( m_hwCounterDraw.m_items.empty() );
 
     m_keepActive = visible && m_worker.IsDataStatic();
 
@@ -231,6 +234,8 @@ void TimelineItemCore::Preprocess( const TimelineContext& ctx, TaskDispatch& td,
             m_maxDepth = std::max(m_maxDepth, m_depth);
 
             PreprocessCpuCtxSwitches( ctx, cslist, ctxRange );
+
+            PreprocessHwCounter( ctx, cslist, ctxRange );
         } );
     }
 }
@@ -465,6 +470,120 @@ void TimelineItemCore::PreprocessCpuCtxSwitches( const TimelineContext &ctx, con
         ContextSwitchDrawType type = ( ( tid != 0 ) ? ContextSwitchDrawType::Running : ContextSwitchDrawType::Waiting );
         m_ctxDraw.emplace_back( ContextSwitchDraw { type, (uint32_t)index, 1, 0});
     }
+}
+
+void TimelineItemCore::PreprocessHwCounter( const TimelineContext &ctx, const Vector<ContextSwitchCpu> &cslist, const ContextSwitchCpuRange &ctxRange )
+{
+    // TODO Remove. Only testing on core 0 !!!
+    //if ( m_coreInfo.core != 0 )
+    //    return;
+    
+    const int64_t vStart = ctx.vStart;
+    const int64_t vEnd = ctx.vEnd;
+    const auto nspx = ctx.nspx;
+    const auto MinVisNs = int64_t( round( GetScale() * MinHwCounterVisSize * nspx ) );
+    const Vector<HwCounterData>& hwCounter = m_coreInfo.cpuData->hwCounter;
+    m_hwCounterDraw.m_maxCount = 0;
+
+    // TODO Do we need to sort the hw counter vector. Assuming sorted for now ...
+    if ( hwCounter.empty() || ( hwCounter.front().time.Val() > vEnd ) || ( hwCounter.back().time.Val() < vStart ) )
+        return;
+
+    // Using context switch data to only display hw counter for the current process.
+    auto ctxIt = cslist.begin() + ctxRange.beg;
+    const auto ctxEndIt = cslist.begin() + ctxRange.end;
+    ctxIt = FindFirstLocalCtxSwitch( ctxIt, ctxEndIt );
+    if ( ctxIt == ctxEndIt )
+    {
+        // The view is focused on the cpu being idle or external program. Nothing to do
+        return;
+    }
+    int64_t currentCtxStartTime = ctxIt->Start();
+    int64_t currentCtxEndTime = ctxIt->IsEndValid() ? ctxIt->End() : ctxIt->Start();
+
+    auto beginIt = std::lower_bound( hwCounter.begin(), hwCounter.end(), vStart, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
+    auto endIt = std::lower_bound( beginIt, hwCounter.end(), vEnd, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
+
+    if ( beginIt != hwCounter.begin() ) beginIt--;
+
+    auto it = beginIt;
+    HwCounterDrawItem counterDraw;
+    int64_t nAccDurationNs = 0;
+    while ( it < endIt )
+    {
+        auto next = it + 1;
+
+        // TODO what happend if next == endId ???? crash ????
+        int64_t durationNs = next->time.Val() - it->time.Val();
+        int64_t midpointTime = it->time.Val() + ( durationNs / 2 );
+
+        // Only display hw counter for the current process
+        if ( midpointTime > currentCtxStartTime && midpointTime < currentCtxEndTime )
+        {
+            // Merge hw counter data if necessary (too small to be visualized)
+            if ( ( next->time.Val() - counterDraw.tstart.Val() ) < MinVisNs )
+            {
+                counterDraw.tend = next->time;
+                counterDraw.count += ( next->count - it->count );
+                nAccDurationNs += durationNs;
+            }
+            else
+            {
+                // draw merged hw counter
+                if ( counterDraw.count > 0 )
+                {
+                    m_hwCounterDraw.AddDrawItem( counterDraw.tstart, counterDraw.tend, counterDraw.count, nAccDurationNs );
+                }
+
+                // start a new draw command
+                counterDraw.tstart = it->time;
+                counterDraw.tend = next->time;
+                counterDraw.count = next->count - it->count;
+                counterDraw.rate = 0.0f;
+                nAccDurationNs = durationNs;
+            }
+        }
+        
+        // Find the next 'ContextSwitchCpu' for the current process
+        while ( midpointTime >= currentCtxEndTime && ctxIt != ctxEndIt )
+        {
+            ctxIt = FindFirstLocalCtxSwitch( ctxIt + 1, ctxEndIt );
+            if ( ctxIt != ctxEndIt )
+            {
+                currentCtxStartTime = ctxIt->Start();
+                currentCtxEndTime = ctxIt->IsEndValid() ? ctxIt->End() : ctxIt->Start();
+            }
+        }
+
+        it = next;
+    }
+
+    if ( counterDraw.count > 0 )
+    {
+        m_hwCounterDraw.AddDrawItem( counterDraw.tstart, counterDraw.tend, counterDraw.count, nAccDurationNs );
+    }
+
+    m_hwCounterDraw.m_name = m_worker.GetHwCounterName();
+    m_hwCounterDraw.m_description = m_worker.GetHwCounterDescription();
+
+    m_view.UpdateHwCounterMaxValues( m_hwCounterDraw.m_maxCount, m_hwCounterDraw.m_maxRate );
+}
+
+const ContextSwitchCpu *TimelineItemCore::FindFirstLocalCtxSwitch( const ContextSwitchCpu *beginIt, const ContextSwitchCpu *endIt )
+{
+    while ( beginIt < endIt )
+    {
+        const uint16_t cstid = beginIt->Thread();
+        const ThreadData *td = m_threadLut[ cstid ];
+        if ( td )
+        {
+            return beginIt;
+        }
+
+        beginIt++;
+    }
+    
+    return endIt;
 }
 
 

@@ -8,7 +8,7 @@ namespace tracy
 {
 
 ThreadCompress::ThreadCompress()
-    : m_threadLast( std::numeric_limits<uint64_t>::max(), 0 )
+    : m_threadLast( std::numeric_limits<uint64_t>::max(), (uint16_t)0 )
 {
 }
 

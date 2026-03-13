@@ -40,8 +40,8 @@ private:
     std::vector<CpuUsageDraw> m_cpuDraw;
     std::vector<std::vector<CpuCtxDraw>> m_ctxDraw;
 
-    bool m_hasCpuData;
-	bool m_drawThreadInteractions;
+    bool m_hasCpuData = false;
+    bool m_drawThreadInteractions = false;
 };
 
 }

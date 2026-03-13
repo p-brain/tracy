@@ -24,14 +24,28 @@ void View::DrawInfo()
         char etmp[64];
         time_t et = exectime;
         auto elt = localtime( &et );
-        strftime( etmp, 64, "%F %T", elt );
+        if ( elt != nullptr )
+        {
+            strftime( etmp, 64, "%F %T", elt );
+        }
+        else
+        {
+            sprintf( etmp, "unknown" );
+        }
         TextFocused( "Build time:", etmp );
     }
     {
         char dtmp[64];
         time_t date = m_worker.GetCaptureTime();
         auto lt = localtime( &date );
-        strftime( dtmp, 64, "%F %T", lt );
+        if ( lt != nullptr )
+        {
+            strftime( dtmp, 64, "%F %T", lt );
+        }
+        else
+        {
+            sprintf( dtmp, "unknown" );
+        }
         TextFocused( "Capture time:", dtmp );
     }
     if( !m_filename.empty() )
@@ -133,6 +147,7 @@ void View::DrawInfo()
             TextFocused( "Unique addresses:", RealToString( m_worker.GetHwSampleCountAddress() ) );
             ImGui::EndTooltip();
         }
+        TextFocused( "Hardware counters:", RealToString( m_worker.GetHwCounterCount() ) );
         TextFocused( "Frame images:", RealToString( ficnt ) );
         if( ficnt != 0 && ImGui::IsItemHovered() )
         {
@@ -701,37 +716,50 @@ void View::DrawInfo()
             const float margin = round( ty * 0.5 );
             const float small = round( sty * 0.5 );
 
-            std::vector<int> maxthreads( topology.size() );
+            struct CoreAndThreadCount
+            {
+                uint32_t cores;
+                int mt;
+            };
+
+            std::vector<CoreAndThreadCount> countAndMaxThreads( topology.size() );
 
             float ptsz = 0;
             float ctsz = 0;
             float ttsz = 0;
             for( auto& package : topology )
             {
-                sprintf( buf, ICON_FA_BOX " Package %" PRIu32, package.first );
+                sprintf( buf, ICON_FA_BOX " Package %" PRIu32, package.first.val );
                 ImGui::PushFont( m_smallFont );
                 const auto psz = ImGui::CalcTextSize( buf ).x;
                 if( psz > ptsz ) ptsz = psz;
                 ImGui::PopFont();
 
                 size_t mt = 0;
-                for( auto& core : package.second )
+                uint32_t coreCount = 0;
+                for ( auto& group : package.second )
                 {
-                    sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, core.first );
-                    const auto csz = ImGui::CalcTextSize( buf ).x;
-                    if( csz > ctsz ) ctsz = csz;
-
-                    const auto tnum = core.second.size();
-                    if( tnum > mt ) mt = tnum;
-
-                    for( auto& thread : core.second )
+                    for( auto& core : group.second )
                     {
-                        sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, thread );
-                        const auto tsz = ImGui::CalcTextSize( buf ).x;
-                        if( tsz > ttsz ) ttsz = tsz;
+                        const Worker::CpuThreadList& threads = core.second;
+                        coreCount++;
+                        sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, core.first.val );
+                        const auto csz = ImGui::CalcTextSize( buf ).x;
+                        if( csz > ctsz ) ctsz = csz;
+
+                        const auto tnum = threads.size();
+                        if( tnum > mt ) mt = tnum;
+
+                        for( auto& thread : threads )
+                        {
+                            sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, thread.val );
+                            const auto tsz = ImGui::CalcTextSize( buf ).x;
+                            if( tsz > ttsz ) ttsz = tsz;
+                        }
                     }
                 }
-                maxthreads[package.first] = (int)mt;
+                countAndMaxThreads[ package.first.val ].cores = coreCount;
+                countAndMaxThreads[ package.first.val ].mt = (int)mt;
             }
 
             const auto remainingWidth = ImGui::GetContentRegionAvail().x;
@@ -747,38 +775,48 @@ void View::DrawInfo()
             std::sort( tsort.begin(), tsort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
             for( auto& package : tsort )
             {
-                if( package->first != 0 ) dpos.y += ty;
-                sprintf( buf, ICON_FA_BOX " Package %" PRIu32, package->first );
+                const CpuPackageId packageId = package->first;
+                if( packageId.val != 0 ) dpos.y += ty;
+                sprintf( buf, ICON_FA_BOX " Package %" PRIu32, packageId.val );
                 draw->AddText( dpos, 0xFFFFFFFF, buf );
                 dpos.y += ty;
 
-                const auto inCoreWidth = ( ttsz + margin ) * maxthreads[package->first];
+                const auto inCoreWidth = ( ttsz + margin ) * countAndMaxThreads[ packageId.val ].mt;
                 const auto coreWidth = inCoreWidth + 2 * margin;
                 const auto inCoreHeight = margin + 2 * small + ty;
                 const auto coreHeight = inCoreHeight + ty;
                 const auto cpl = std::max( 1, (int)floor( ( remainingWidth - 2 * margin ) / coreWidth ) );
-                const auto cl = ( package->second.size() + cpl - 1 ) / cpl;
+                const auto cl = ( countAndMaxThreads[ packageId.val ].cores + cpl - 1 ) / cpl;
                 const auto pw = cpl * coreWidth + 2 * margin;
                 const auto ph = margin + cl * coreHeight;
                 if( pw > width ) width = pw;
 
-                draw->AddRect( dpos, dpos + ImVec2( margin + coreWidth * std::min<size_t>( cpl, package->second.size() ), ph ), 0xFFFFFFFF );
+                draw->AddRect( dpos, dpos + ImVec2( margin + coreWidth * std::min<size_t>( cpl, countAndMaxThreads[ packageId.val ].cores ), ph ), 0xFFFFFFFF );
 
-                std::vector<decltype(package->second.begin())> csort;
+                std::vector<decltype(package->second.begin()->second)::const_iterator> csort;
                 csort.reserve( package->second.size() );
-                for( auto it = package->second.begin(); it != package->second.end(); ++it ) csort.emplace_back( it );
+                for( auto it = package->second.begin(); it != package->second.end(); ++it )
+                {
+                    for ( auto cit = it->second.begin(); cit != it->second.end(); ++cit )
+                    {
+                        csort.emplace_back( cit );
+                    }
+                }
+
                 std::sort( csort.begin(), csort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
                 auto cpos = dpos + ImVec2( margin, margin );
                 int ll = cpl;
                 for( auto& core : csort )
                 {
-                    sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, core->first );
+                    const CpuCoreId coreId = core->first;
+                    const Worker::CpuThreadList& threads = core->second;
+                    sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, coreId.val );
                     draw->AddText( cpos, 0xFFFFFFFF, buf );
                     draw->AddRect( cpos + ImVec2( 0, ty ), cpos + ImVec2( inCoreWidth + small, inCoreHeight + small ), 0xFFFFFFFF );
 
-                    for( int i=0; i<core->second.size(); i++ )
+                    for( int i = 0; i < threads.size(); i++ )
                     {
-                        sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, core->second[i] );
+                        sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, threads[i].val );
                         draw->AddText( cpos + ImVec2( margin + i * ( margin + ttsz ), ty + small ), 0xFFFFFFFF, buf );
                     }
 
@@ -797,6 +835,264 @@ void View::DrawInfo()
             }
             ImGui::ItemSize( ImVec2( width, dpos.y - origy ) );
             ImGui::TreePop();
+        }
+
+        const Worker::CpuCacheInfo* cacheList = m_worker.GetCacheList();
+        if( cacheList )
+        {
+            if( ImGui::TreeNode( "Cache topology" ) )
+            {
+                static const ImVec4 s_CacheCols[] =
+                {
+                    (ImVec4)ImColor( 1.0f, 1.0f, 1.0f ),
+                    (ImVec4)ImColor( 0.6f, 1.0f, 0.6f ),
+                    (ImVec4)ImColor( 1.0f, 0.6f, 0.25f ),
+                    (ImVec4)ImColor( 1.0f, 0.34f, 0.34f ),
+                    (ImVec4)ImColor( 1.0f, 0.0f, 0.0f ),
+                };
+
+                static const char s_CacheTypePrefix[] =
+                {
+                    'x',
+                    'U',
+                    'I',
+                    'D',
+                };
+
+                ImFont* tooltipFont = ImGui::GetFont();
+
+                char buf[ 512 ];
+                for( auto& package : topology )
+                {
+                    const CpuPackageId packageId = package.first;
+                    ImGui::Text( ICON_FA_BOX " Package %" PRIu32, packageId.val );
+
+                    uint32_t groupCount = 0;
+                    for ( auto& group : package.second )
+                    {
+                        if ( !group.second.empty() )
+                        {
+                            groupCount++;
+                        }
+                    }
+
+                    ImVec2 perGroupAvail( 0, 0 );
+                    if ( groupCount > 0 )
+                    {
+                        const ImGuiStyle& style = ImGui::GetStyle();
+                        const ImVec2 itemSpacing = style.ItemSpacing;
+                        const ImVec2 avail = ImGui::GetContentRegionAvail();
+                        const float groupHeaderHeight = ( ( ImGui::GetTextLineHeight() + itemSpacing.y ) * groupCount + itemSpacing.y );
+                        perGroupAvail = ImVec2( avail.x, ( avail.y - groupHeaderHeight ) / groupCount );
+                    }
+
+                    for ( auto& group : package.second )
+                    {
+                        if ( group.second.empty() )
+                        {
+                            continue;
+                        }
+
+                        ImVec2 cacheDim( 0, 0 );
+                        int cacheNameLen = 0;
+                        std::vector< const Worker::CpuCacheInfo* > groupCaches;
+                        ImGui::PushFont( m_fixedFont );
+                        for ( const Worker::CpuCacheInfo *cache = cacheList; cache; cache = cache->next )
+                        {
+                            if ( ( cache->package == packageId ) && ( cache->group == group.first ) )
+                            {
+                                groupCaches.push_back( cache );
+
+                                int written = sprintf( buf
+                                     , "L%u %c$ %s"
+                                     , cache->level
+                                     , s_CacheTypePrefix[ ( uint8_t ) cache->type ]
+                                     , MemSizeToString( cache->size )
+                                );
+
+                                cacheDim = ImMax( cacheDim, ImGui::CalcTextSize( buf ) );
+                                cacheNameLen = ImMax( cacheNameLen, written );
+                            }
+                        }
+                        ImGui::PopFont();
+
+                        std::vector<const Worker::CpuThreadTopology*> coreInfos;
+                        coreInfos.reserve( group.second.size() );
+
+                        ImVec2 cellDim( 0, ImGui::GetTextLineHeight() );
+                        for ( auto& core : group.second )
+                        {
+                            const Worker::CpuThreadTopology* topo = m_worker.GetThreadTopology( core.first );
+                            if ( topo )
+                            {
+                                coreInfos.push_back( topo );
+                                int written = sprintf( buf, "%u", topo->core.val );
+                                cellDim.x = ImMax( cellDim.x, ImGui::CalcTextSize( buf ).x );
+                            }
+                        }
+
+                        std::sort( coreInfos.begin(), coreInfos.end(),
+                                  []( const Worker::CpuThreadTopology* lhs, const Worker::CpuThreadTopology* rhs )
+                                  {
+                                      return lhs->core < rhs->core;
+                                  });
+
+                        ImGui::Text( " Group: %" PRIu32, group.first );
+                        ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingFixedFit
+                            | ImGuiTableFlags_Borders
+                            | ImGuiTableFlags_NoHostExtendX
+                            | ImGuiTableFlags_ScrollX
+                            | ImGuiTableFlags_ScrollY
+                        ;
+
+                        const ImGuiStyle& style = ImGui::GetStyle();
+                        const ImVec2 scrollBarSize( style.ScrollbarSize, style.ScrollbarSize );
+                        const ImVec2 itemSpacing = style.ItemSpacing;
+                        const float cacheWidth = ( cacheDim.x + itemSpacing.x + 1.0f );
+                        const float cellWidth = ( cellDim.x + itemSpacing.x + 1.0f );
+                        const float lineWidth = ( cacheWidth + cellWidth * coreInfos.size() );
+
+                        const float firstCellHeight = (ImGui::GetTextLineHeight() * 2 + itemSpacing.y );
+                        const float cellHeight = (ImGui::GetTextLineHeight() + itemSpacing.y );
+                        const float columnHeight = (cellHeight * groupCaches.size() ) + firstCellHeight;
+
+                        const ImVec2 minTableSize = ImVec2( cacheWidth + cellWidth, firstCellHeight + cellHeight ) + scrollBarSize;
+                        const ImVec2 fullTableSize = ImVec2( lineWidth, columnHeight ) + scrollBarSize;
+                        const ImVec2 outerSize_ = ImMin( fullTableSize, perGroupAvail );
+                        const ImVec2 outerSize = ImMax( outerSize_, minTableSize );
+
+                        if ( ImGui::BeginTable( "##CacheTopoTable" , (int)group.second.size() + 1, tableFlags, outerSize) )
+                        {
+                            ImGui::PushFont( m_fixedFont );
+
+                            ImGui::TableSetupColumn( "" );
+                            for ( auto& coreInfo : coreInfos )
+                            {
+                                ImGui::TableSetupColumn( "", ImGuiTableColumnFlags_WidthFixed, cellDim.x );
+                            }
+
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            int wsCount = ImMax( 0, cacheNameLen - (int)strlen( "cores" ) );
+                            sprintf( buf, "%*ccores\ncaches", wsCount, ' ' );
+                            ImGui::Text( buf );
+
+                            // Table header/core list
+                            for ( const Worker::CpuThreadTopology* coreInfo : coreInfos )
+                            {
+                                sprintf( buf, "#\n%" PRIu32, coreInfo->core.val );
+
+                                bool ignoreSelected = false;
+                                ImGui::TableNextColumn();
+                                ImGui::Selectable( buf, &ignoreSelected );
+
+                                if ( ImGui::IsItemHovered() )
+                                {
+                                    std::vector<const Worker::CpuCacheInfo*> cachesForCore;
+                                    m_worker.GetCachesForCore( coreInfo, cachesForCore );
+                                    if ( !cachesForCore.empty() )
+                                    {
+                                        ImGui::PushFont( tooltipFont );
+                                        ImGui::BeginTooltip();
+
+                                        ImGui::Text( ICON_FA_MICROCHIP "%d", coreInfo->core );
+                                        for ( const Worker::CpuCacheInfo* cache : cachesForCore )
+                                        {
+                                            const int levelIndex = std::min( (int)cache->level, IM_ARRAYSIZE( s_CacheCols ) );
+                                            const int typeIndex = std::min( (int)cache->type, IM_ARRAYSIZE( s_CacheTypePrefix ) );
+                                            ImGui::TextColored( s_CacheCols[ levelIndex ]
+                                                                , "L%u %c$ %s (line: %s)"
+                                                                , cache->level
+                                                                , s_CacheTypePrefix[ typeIndex ]
+                                                                , MemSizeToString( cache->size )
+                                                                , MemSizeToString( cache->linesize )
+                                            );
+                                        }
+
+                                        ImGui::EndTooltip();
+                                        ImGui::PopFont();
+                                    }
+                                }
+                            }
+
+                            // Table body/cache infos
+                            for ( const Worker::CpuCacheInfo* cache : groupCaches )
+                            {
+                                const int levelIndex = std::min( (int)cache->level, IM_ARRAYSIZE( s_CacheCols ) );
+                                const int typeIndex = std::min( (int)cache->type, IM_ARRAYSIZE( s_CacheTypePrefix ) );
+                                ImGui::TableNextRow();
+
+                                sprintf( buf
+                                         , "L%u %c$ %s"
+                                         , cache->level
+                                         , s_CacheTypePrefix[ typeIndex ]
+                                         , MemSizeToString( cache->size )
+                                );
+
+                                ImGui::TableNextColumn();
+                                bool ignoreSelected = false;
+                                ImGui::Selectable( buf, &ignoreSelected );
+                                if ( ImGui::IsItemHovered() )
+                                {
+                                    std::vector<const Worker::CpuThreadTopology*> coresForCache;
+                                    m_worker.GetCoresForCache( cache, coresForCache );
+                                    if ( !coresForCache.empty() )
+                                    {
+                                        enum { CorePerLine = 8 };
+                                        ImGui::PushFont( tooltipFont );
+                                        ImGui::BeginTooltip();
+                                        ImGui::TextColored( s_CacheCols[ levelIndex ], buf );
+                                        ImGui::SameLine();
+                                        ImGui::TextColored( s_CacheCols[ levelIndex ], " (line: %s)", MemSizeToString( cache->linesize ) );
+                                        for ( size_t coreIndex = 0; coreIndex < coresForCache.size(); coreIndex++ )
+                                        {
+                                            const Worker::CpuThreadTopology* topo = coresForCache[ coreIndex ];
+                                            const bool nextLine = ( ( coreIndex % CorePerLine ) == 0 );
+                                            if ( ( coreIndex != 0 ) && !nextLine )
+                                            {
+                                                ImGui::SameLine();
+                                            }
+                                            ImGui::Text( "%s" ICON_FA_MICROCHIP "%u", nextLine ? "" : " ", topo->core );
+                                        }
+                                        ImGui::EndTooltip();
+                                        ImGui::PopFont();
+                                    }
+                                }
+
+                                for ( const Worker::CpuThreadTopology* coreInfo : coreInfos )
+                                {
+                                    ImGui::TableNextColumn();
+                                    if ( coreInfo->coreInGroupMask && ( coreInfo->coreInGroupMask & cache->coreInGroupMask ) == coreInfo->coreInGroupMask ) {
+                                        ImGui::TableSetBgColor( ImGuiTableBgTarget_CellBg, ImGui::GetColorU32( s_CacheCols[ levelIndex ] ) );
+
+                                        ImGui::PushStyleVar( ImGuiStyleVar_Alpha, 0 );
+                                        bool ignoreSelected = false;
+                                        ImGui::Selectable( "", &ignoreSelected );
+                                        ImGui::PopStyleVar();
+
+                                        if ( ImGui::IsItemHovered() )
+                                        {
+                                            ImGui::PushFont( tooltipFont );
+                                            ImGui::BeginTooltip();
+                                            ImGui::Text( ICON_FA_MICROCHIP "%u", coreInfo->core );
+                                            ImGui::TextColored( s_CacheCols[ levelIndex ], buf );
+                                            ImGui::SameLine();
+                                            ImGui::TextColored( s_CacheCols[ levelIndex ], " (line: %s)", MemSizeToString( cache->linesize ) );
+                                            ImGui::EndTooltip();
+                                            ImGui::PopFont();
+                                        }
+                                    }
+                                }
+                            }
+
+                            ImGui::PopFont();
+                            ImGui::EndTable();
+                        }
+                    }
+                }
+
+                ImGui::TreePop();
+            }
         }
     }
 
