@@ -748,6 +748,7 @@ struct QueueCpuTopology
 {
     uint64_t coreInGroupMask;
     uint16_t package;
+    uint16_t die;
     uint16_t group;
     uint32_t core;
     uint32_t thread;

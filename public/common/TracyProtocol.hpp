@@ -9,8 +9,19 @@ namespace tracy
 
 constexpr unsigned Lz4CompressBound( unsigned isize ) { return isize + ( isize / 255 ) + 16; }
 
+// We have a different protocol from upstream so I chnage the code to (hopefully) force a conflict if
+// the protocol changes. Make sure update the protocol number with the diverging offset we have.
+// Therefore we always need to stay ahead of the upstream protocol but also make sure we don't inadvertently
+// end up with a version we have already "burned/used up".
+// When making changes to our protocol, increase the "offset" value, when upstream changes the protocol simply add
+// our current offset value!
+//
+// Update the comment when updating the protocol!
+// Upstream base protocol version: 69
+// Our current offset from upstream is: 3
+//
 enum : uint32_t { ForceProtocolVersionConflict = 0 };
-enum : uint32_t { ProtocolVersion = ForceProtocolVersionConflict + 71 };
+enum : uint32_t { ProtocolVersion = ForceProtocolVersionConflict + 72 };
 enum : uint16_t { BroadcastVersion = 4 };
 
 using lz4sz_t = uint32_t;

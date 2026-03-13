@@ -7326,6 +7326,7 @@ void Profiler::ReportTopology()
         uint64_t cpuThreadMask;
         uint64_t coreInGroupMask;
         uint16_t package;
+        uint16_t die;
         uint16_t group;
         uint32_t core;
         uint32_t thread;
@@ -7730,6 +7731,7 @@ void Profiler::ReportTopology()
         TracyLfqPrepare( QueueType::CpuTopology );
         MemWrite( &item->cpuTopology.coreInGroupMask, pCpu->coreInGroupMask );
         MemWrite( &item->cpuTopology.package, pCpu->package );
+        MemWrite( &item->cpuTopology.die, pCpu->die );
         MemWrite( &item->cpuTopology.group, pCpu->group );
         MemWrite( &item->cpuTopology.core, pCpu->core );
         MemWrite( &item->cpuTopology.thread, pCpu->thread );
