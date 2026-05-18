@@ -7843,16 +7843,16 @@ void Profiler::ReportTopology()
                     cpuData[i].core = coreId;
                 }
             }
-        }
 
-        sprintf( path, "%s%i/topology/die_id", basePath, i );
-        f = fopen( path, "rb" );
-        if( f )
-        {
-            read = fread( buf, 1, 1024, f );
-            buf[read] = '\0';
-            fclose( f );
-            cpuData[i].die = uint32_t( atoi( buf ) );
+            sprintf( path, "%s%i/topology/die_id", basePath, i );
+            f = fopen( path, "rb" );
+            if( f )
+            {
+                read = fread( buf, 1, 1024, f );
+                buf[read] = '\0';
+                fclose( f );
+                cpuData[i].die = uint32_t( atoi( buf ) );
+            }
         }
     }
 #endif
