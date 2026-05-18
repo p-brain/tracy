@@ -495,7 +495,7 @@ private:
 #endif // if defined( TRACY_NO_EXCEPTIONS )
         }
 
-        m_data = (char*)mmap( nullptr, m_dataSize, PROT_READ, MAP_SHARED, _fileno( f ), 0 );
+        m_data = (char*)mmap( nullptr, m_dataSize, PROT_READ, MAP_SHARED, fileno( f ), 0 );
         fclose( f );
         if( !m_data )
         {

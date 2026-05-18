@@ -7848,7 +7848,7 @@ void Profiler::ReportTopology()
             f = fopen( path, "rb" );
             if( f )
             {
-                read = fread( buf, 1, 1024, f );
+                auto read = fread( buf, 1, 1024, f );
                 buf[read] = '\0';
                 fclose( f );
                 cpuData[i].die = uint32_t( atoi( buf ) );
