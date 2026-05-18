@@ -248,7 +248,7 @@ static void InitializeCountersForAllMicroArchitectures()
             HwCounter_t *pCounter = &s_uarch_ ## counterUAarch.m_counters[ IndexHelpers::IndexTypeToRawInteger( HwCustomCounterId_t::counterId ) ];   \
             pCounter->m_id = HwCustomCounterId_t::counterId;    \
             pCounter->m_szShortName = counterShortName;      \
-            pCounter->m_szDescription = #counterVendorName ## " - " ## counterDescrition;      \
+            pCounter->m_szDescription = #counterVendorName " - " counterDescrition;      \
             pCounter->m_etwDef =    \
             {   \
                 .EventTraceInformationClass = EventTraceProfileSourceAddInformation,    \

@@ -17,11 +17,11 @@ constexpr unsigned Lz4CompressBound( unsigned isize ) { return isize + ( isize /
 // our current offset value!
 //
 // Update the comment when updating the protocol!
-// Upstream base protocol version: 69
-// Our current offset from upstream is: 3
+// Upstream base protocol version: 74
+// Our current offset from upstream is: 1
 //
 enum : uint32_t { ForceProtocolVersionConflict = 0 };
-enum : uint32_t { ProtocolVersion = ForceProtocolVersionConflict + 72 };
+enum : uint32_t { ProtocolVersion = ForceProtocolVersionConflict + 75 };
 enum : uint16_t { BroadcastVersion = 4 };
 
 using lz4sz_t = uint32_t;

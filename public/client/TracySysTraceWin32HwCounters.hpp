@@ -14,9 +14,9 @@ namespace tracy
 // need to de-registered with ETW. 
 enum class HwCustomCounterId_t : uint8_t
 {
-    VALVE_COUNTER_INVALID = -1,
+    VALVE_COUNTER_INVALID = 0xFF,
     
-    VALVE_COUNTER_CPU_CYCLES,
+    VALVE_COUNTER_CPU_CYCLES = 0,
     VALVE_COUNTER_INSTRUCTION,
 
     VALVE_COUNTER_BRANCH,

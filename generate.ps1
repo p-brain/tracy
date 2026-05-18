@@ -12,7 +12,7 @@ param(
 
 
 $cmakeProjects = @("ALL_BUILD", "INSTALL", "PACKAGE", "ZERO_CHECK", "CMakePredefinedTargets")
-$externDeps = @( "capstone", "freetype", "glfw", "rapidjson", "travis_doc", "update_mappings" )
+$externDeps = @( "capstone", "freetype", "glfw", "rapidjson", "nfd", "zstd", "imgui", "ppqsort" )
 
 
 function Cmake-GenerateProjects
@@ -38,7 +38,9 @@ function Cmake-GenerateProjects
     )
 
     $cmakeCommand = $cmakeCommandParts -join ' '
-    Write-Host $cmakeCommand
+    Write-Host $cmakeCommand -ForegroundColor DarkGreen
+    Write-Host ""
+
     Invoke-Expression $cmakeCommand | Out-Null
 
     $result = [bool]($LastExitCode -eq 0)
@@ -56,6 +58,8 @@ function Compile-Dependencies
     param(
         [string]$srcPath
     )
+
+    $srcFullPath = (Get-Item (Convert-Path $srcPath)).FullName
     $depsPath = Join-Path -Path $srcPath -ChildPath "_deps"
 
     if ( Test-Path -Path "$depsPath" -PathType Container ) {
@@ -64,6 +68,37 @@ function Compile-Dependencies
         Push-Location $depsPath
 
         $commonBase = (Get-Item .).FullName
+
+        # imgui special case...
+        $imguiPrjFullPath = Join-Path -Path "$srcFullPath" -ChildPath "TracyImGui.vcxproj"
+        if ( Test-Path -Path $imguiPrjFullPath -PathType Leaf ) {
+            Write-Host "Building: prj file: 'TracyImGui.vcxproj'" -ForegroundColor DarkYellow
+
+            $depsFullPath = Join-Path -Path $srcFullPath -ChildPath "_deps"
+            $outFullPath = Join-Path -Path $depsFullPath -ChildPath "imgui-build"
+            New-Item -Path "$outFullPath" -ItemType Directory -Force | Out-Null
+
+            if ( -Not $outFullPath.EndsWith( [System.IO.Path]::DirectorySeparatorChar ) ) {
+                $outFullPath = $outFullPath + [System.IO.Path]::DirectorySeparatorChar
+            }
+
+            Push-Location "$outFullPath"
+
+            $outFullPath = $outFullPath.Replace( "\", "\\" )
+            $msbuildCmd = 'msbuild /nologo /verbosity:quiet /p:Configuration=__config__ /p:OutDir="__outdir__" /t:Rebuild ' + $imguiPrjFullPath
+
+            $compDbg = $msbuildCmd.Replace( '__config__', 'Debug' ).Replace( '__outdir__', $outFullPath + 'Debug\\' )
+            Write-Host $compDbg -ForegroundColor DarkGreen
+            Invoke-Expression $compDbg
+
+            $compRel = $msbuildCmd.Replace( '__config__', 'Release' ).Replace( '__outdir__', $outFullPath + 'Release\\' )
+            Write-Host $compRel -ForegroundColor DarkGreen
+            Invoke-Expression $compRel
+
+            Pop-Location
+
+            Write-Host ""
+        }
 
         $alldirs = Get-ChildItem -Path "." -Directory
         $dirs = $alldirs
@@ -74,33 +109,37 @@ function Compile-Dependencies
         foreach ( $bd in $buildDirs ) {
             $checkDirs = Get-ChildItem -Path $bd -Directory -Recurse
 
-            $depProj = $bd.Name.TrimEnd("-build")
-            $depProjFile = [io.path]::ChangeExtension( $depProj, "vcxproj" )
-            $checkPath = Join-Path -Path $bd.FullName -ChildPath $depProjFile
+            $depProj = $bd.Name.Replace( "-build", "" )
+            $prjName = [io.path]::ChangeExtension( $depProj, "vcxproj" )
+            $depProjFile = (Get-ChildItem -Path "$bd" -Filter "$prjName" -Recurse -File).FullName
 
-            if ( Test-Path -Path $checkPath ) {
-                $relPath = $checkPath.Substring( $commonBase.Length ).TrimStart( '\' )
+            if ( -not [string]::IsNullOrEmpty( $depProjFile ) -and (Test-Path -Path $depProjFile) ) {
+                $relPath = $depProjFile.Substring( $commonBase.Length ).TrimStart( '\' )
                 $depProjectFiles += $relPath
-            } else {
-                foreach ( $dir in $checkDirs ) {
-                    $checkPath = Join-Path -Path $dir.FullName -ChildPath $depProjFile
-
-                    if ( Test-Path -Path $checkPath ) {
-                        $relPath = $checkPath.Substring( $commonBase.Length ).TrimStart( '\' )
-                        $depProjectFiles += $relPath
-                    }
-                }
             }
         }
 
         foreach ( $dep in $depProjectFiles ) {
             $relPath = (Get-Item $dep).DirectoryName
-            $slnFile = (Get-Item $dep).Name
+            $prjFile = (Get-Item $dep).Name
+
+            Write-Host "Building: prj file: '$prjFile', relPath: '$relPath'" -ForegroundColor DarkYellow
+
             Push-Location "$relPath"
-            & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Debug' '/t:Rebuild' $slnFile
-            & 'msbuild' '/nologo' '/verbosity:quiet' '/p:Configuration=Release' '/t:Rebuild' $slnFile
+            $msbuildCmd = 'msbuild /nologo /verbosity:quiet /p:Configuration=__config__ /t:Rebuild ' + $prjFile
+
+            $compDbg = $msbuildCmd.Replace( '__config__', 'Debug' )
+            Write-Host $compDbg -ForegroundColor DarkGreen
+            Invoke-Expression $compDbg | Out-Null
+
+            $compRel = $msbuildCmd.Replace( '__config__', 'Release' )
+            Write-Host $compRel -ForegroundColor DarkGreen
+            Invoke-Expression $compRel | Out-Null
             Pop-Location
+
+            Write-Host ""
         }
+
         Pop-Location
 
         Write-Host ""
@@ -125,46 +164,63 @@ function Prep-Dependency()
     Write-Host "$project "  -ForegroundColor Green -NoNewline
     Write-Host "$srcPath -> $dstPath" -ForegroundColor DarkCyan
 
-    $srcIncPath = Join-Path -Path "$srcPath" -ChildPath ( Join-Path -Path "_deps" -ChildPath "$project-src" | Join-Path -ChildPath "include" )
-    $dstIncPath = Join-Path -Path "$dstPath" -ChildPath ( Join-Path -Path "_deps" -ChildPath "$project-src" | Join-Path -ChildPath "include" )
+    $srcPrjPath = Join-Path -Path "$srcPath" -ChildPath ( Join-Path -Path "_deps" -ChildPath "$project-src" )
+    $dstPrjPath = Join-Path -Path "$dstPath" -ChildPath ( Join-Path -Path "_deps" -ChildPath "$project-src" )
+
+    $srcIncPath = Join-Path -Path "$srcPrjPath" -ChildPath "include"
+    $dstIncPath = Join-Path -Path "$dstPrjPath" -ChildPath "include"
+
+    if ( $project -eq "imgui" ) {
+        $srcIncPath = "$srcPrjPath"
+    } elseif ( $project -eq "zstd" ) {
+        $srcIncPath = Join-Path -Path "$srcPrjPath" -ChildPath "lib"
+    } elseif ( $project -eq "nfd" ) {
+        $srcIncPath = Join-Path -Path "$srcPrjPath" -ChildPath ( Join-Path -Path "src" -ChildPath "include" )
+    }
 
     if ( Test-Path -Path "$srcIncPath" -PathType Container ) {
-        if ( -Not (Test-Path -Path "$dstIncPath" -PathType Container) ) {
-            New-Item -Path "$dstIncPath" -ItemType Directory -Force | Out-Null
-        }
+        New-Item -Path "$dstIncPath" -ItemType Directory -Force | Out-Null
 
-        Copy-Item -Path "$srcIncPath\*" -Destination "$dstIncPath\" -Recurse -Container -Force
+        if ( $project -eq "imgui" ) {
+            New-Item -Path "$dstIncPath\misc\freetype" -ItemType Directory -Force | Out-Null
+            Copy-Item -Path "$srcIncPath\*.h" -Destination "$dstIncPath\" -Force
+            Copy-Item -Path "$srcIncPath\misc\freetype\*.h" -Destination "$dstIncPath\misc\freetype" -Force
+
+            $srcBackendPath = Join-Path -Path "$srcIncPath" -ChildPath "backends"
+            $dstBackendPath = Join-Path -Path "$dstIncPath" -ChildPath "backends"
+
+            if ( Test-Path -Path "$srcBackendPath" ) {
+                New-Item -Path "$dstBackendPath" -ItemType Directory -Force | Out-Null
+
+                Copy-Item -Path "$srcBackendPath\imgui_impl_glfw.*" -Destination "$dstBackendPath\" -Force
+                Copy-Item -Path "$srcBackendPath\imgui_impl_opengl3.h" -Destination "$dstBackendPath\" -Force
+                Copy-Item -Path "$srcBackendPath\imgui_impl_opengl3_loader.h" -Destination "$dstBackendPath\" -Force
+            }
+        } elseif ( $project -eq "zstd" ) {
+            Copy-Item -Path "$srcIncPath\*.h" -Destination "$dstIncPath\" -Force
+        } else {
+            Copy-Item -Path "$srcIncPath\*" -Destination "$dstIncPath\" -Recurse -Container -Force
+        }
     }
 
     $srcLibPath = Join-Path -Path "$srcPath" -ChildPath ( Join-Path -Path "_deps" -ChildPath "$project-build" )
     $dstLibPath = Join-Path -Path "$dstPath" -ChildPath ( Join-Path -Path "_deps" -ChildPath "$project-build" )
 
     if ( Test-Path -Path "$srcLibPath\debug" -PathType Container ) {
-        if ( -Not ( Test-Path -Path "$dstLibPath\debug" -PathType Container ) ) {
-            New-Item -Path "$dstLibPath\debug" -ItemType Directory -Force | Out-Null
-        }
-
-        Copy-Item -Path "$srcLibPath\debug\*" -Destination "$dstLibPath\debug\" -Recurse -Container -Force
     } elseif ( Test-Path -Path "$srcLibPath\src\debug" -PathType Container ) {
-        if ( -Not (Test-Path -Path "$dstLibPath\src\debug" -PathType Container) ) {
-            New-Item -Path "$dstLibPath\src\debug" -ItemType Directory -Force | Out-Null
-        }
+        $srcLibPath = Join-Path -Path "$srcLibPath" -ChildPath "src"
+    } elseif ( Test-Path -Path "$srcLibPath\lib\debug" -PathType Container ) {
+        $srcLibPath = Join-Path -Path "$srcLibPath" -ChildPath "lib"
+    }
 
-        Copy-Item -Path "$srcLibPath\src\debug\*" -Destination "$dstLibPath\src\debug\" -Recurse -Container -Force
+    if ( Test-Path -Path "$srcLibPath\debug" -PathType Container ) {
+        New-Item -Path "$dstLibPath\debug" -ItemType Directory -Force | Out-Null
+        Copy-Item -Path "$srcLibPath\debug\*" -Destination "$dstLibPath\debug\" -Recurse -Container -Force
     }
 
     if ( Test-Path -Path "$srcLibPath\release" -PathType Container ) {
-        if ( -Not ( Test-Path -Path "$dstLibPath\release" -PathType Container ) ) {
-            New-Item -Path "$dstLibPath\release" -ItemType Directory -Force | Out-Null
-        }
-
+        New-Item -Path "$dstLibPath\release" -ItemType Directory -Force | Out-Null
         Copy-Item -Path "$srcLibPath\release\*" -Destination "$dstLibPath\release\" -Recurse -Container -Force
-    } elseif ( Test-Path -Path "$srcLibPath\src\release" -PathType Container ) {
-        if ( -Not ( Test-Path -Path "$dstLibPath\src\release" -PathType Container ) ) {
-            New-Item -Path "$dstLibPath\src\release" -ItemType Directory -Force | Out-Null
-        }
-
-        Copy-Item -Path "$srcLibPath\src\release\*" -Destination "$dstLibPath\src\release\" -Recurse -Container -Force
     }
 }
 
@@ -179,10 +235,9 @@ function Copy-Dependencies
     if ( Test-Path -Path "$srcPath" -PathType Container ) {
         Write-Host "Copy external includes and libs $srcPath -> $dstPath" -ForegroundColor DarkCyan
 
-        if ( -Not (Test-Path -Path "$dstPath" -PathType Container) ) {
-            New-Item -Path "$dstPath" -ItemType Directory -Force | Out-Null
-        }
+        New-Item -Path "$dstPath" -ItemType Directory -Force | Out-Null
 
+        Write-Host "Handling external binary deps" -ForegroundColor DarkCyan
         foreach ( $proj in $externDeps ) {
             Prep-Dependency $proj $srcPath $dstPath
         }
@@ -275,25 +330,43 @@ function Rewrite-Projects
     $backSlashRepl = "..\" * $depthDiff
     $slashRepl = "../" * $depthDiff
 
-    Get-ChildItem "$srcPath" -Filter $extFilter | 
+    Get-ChildItem "$srcPath" -Filter $extFilter |
     Foreach-Object {
         $base = $_.Name.split(".",2)[0]
 
+        # Just ignore the TracyImGui project. it's an "external dependency" so we build it and just use the lib
+        if ( $base -eq 'TracyImGui' ) {
+            return;
+        }
+
         if ( -Not ( $cmakeProjects -contains $base ) ) {
-            $intputFile = $_.FullName
+            $inputFile = $_.FullName
             $inputName = $_.Name
             $outputPath = Join-Path -Path $PSScriptRoot -ChildPath $dstPath
             $outputFile = Join-Path -Path $outputPath -ChildPath $_.Name
 
-            $content = Get-Content -Path $intputFile
+            $content = Get-Content -Path $inputFile
 
             # Replace absolute source paths with absolute destination paths
             $content = $content.Replace( $srcPathAbs, $dstPathAbs )
             $content = $content.Replace( $srcPathAbs.Replace('\', '/'), $dstPathAbs )
 
-            # # Replace absolute paths with relative paths
+            # Replace absolute paths with relative paths
             $content = $content.Replace( $srcRoot.Replace('\', '/'), $slashRepl)
             $content = $content.Replace( $srcRoot, $backSlashRepl )
+
+            # It clearly is impossible to have a sane decent common directory structure...
+            $content = $content.Replace( 'zstd-src\build\cmake\..\..\lib', 'zstd-src\include' )
+            $content = $content.Replace( 'zstd-build\lib', 'zstd-build' )
+
+            $content = $content.Replace( 'nfd-src\src\include', 'nfd-src\include' )
+            $content = $content.Replace( 'nfd-build\src', 'nfd-build' )
+
+            $content = $content.Replace( 'glfw-build\src', 'glfw-build' )
+
+            $content = $content.Replace( '_deps\imgui-src', '_deps\imgui-src\include' )
+            $content = $content.Replace( 'Debug\TracyImGui.lib', '_deps\imgui-build\Debug\TracyImGui.lib' )
+            $content = $content.Replace( 'Release\TracyImGui.lib', '_deps\imgui-build\Release\TracyImGui.lib' )
 
             [XML]$xml = $content
             $nsUri = "http://schemas.microsoft.com/developer/msbuild/2003"
@@ -331,10 +404,11 @@ function Rewrite-Projects
             if ( $cfgTypeNodes -and $cfgTypeNodes.Count -gt 0 ) {
                 $cfg = $cfgTypeNodes[0]
 
-                $isAppProj = ($cfg -is [System.Xml.XmlNode] -and $cfg.InnerXml -eq 'Application')
+                $isAppProj = ( ( $cfg -is [System.Xml.XmlNode] ) -and ( $cfg.InnerXml -eq 'Application' ) )
                 $rewrite = $true
                 if ( $rewrite -eq $true ) {
-                    Write-Host "Rewriting $_"
+                    $prjFile = $_
+                    Write-Host "Rewriting $prjFile"
                     if ( $isAppProj -and -not [string]::IsNullOrEmpty( $exeName ) ) {
                         $intNodes = Get-MatchingNodes -xml $xml -nsManager $nsManager -xpath "/ns:Project/ns:PropertyGroup/ns:TargetName" -attr 'Condition' -filters "Release"
                         foreach ( $node in $intNodes ) {
@@ -440,10 +514,7 @@ function Copy-Projects
     )
 
     Write-Host "Copy tracy projects and solution" -ForegroundColor DarkCyan
-
-    if ( -Not (Test-Path -Path "$dstPath" -PathType Container) ) {
-        New-Item -Path "$dstPath" -ItemType Directory -Force | Out-Null
-    }
+    New-Item -Path "$dstPath" -ItemType Directory -Force | Out-Null
 
     $intDir = "_temp"
     $intPath = Join-Path -Path "$dstPath" -ChildPath $intDir
@@ -457,9 +528,9 @@ function Copy-Projects
 
     Get-ChildItem "$srcPath" -Filter "*.sln" |
     Foreach-Object {
-        $intputFile = $_.FullName
+        $inputFile = $_.FullName
         $outputFile = Join-Path -Path "$dstPath" -ChildPath $_.Name
-        Copy-Item -Path "$intputFile" -Destination "$outputFile" -Force
+        Copy-Item -Path "$inputFile" -Destination "$outputFile" -Force
 
         $removedProjects = $( $cmakeProjects; $externDeps )
         $prjGuids = @()
@@ -468,7 +539,7 @@ function Copy-Projects
         [string[]]$slnContent = Get-Content -Path "$outputFile"
         for ($i = 0; $i -lt $slnContent.Count; $i++) {
             $prjLine = $slnContent[ $i ]
-            if ( $prjLine.StartsWith( "Project" ) ) {
+            if ( $prjLine.TrimStart().StartsWith( "Project" ) ) {
                 $excludePrj = $false
 
                 foreach( $name in $removedProjects ) {
@@ -488,7 +559,7 @@ function Copy-Projects
 
                 for ( ; $i -lt $slnContent.Count; $i++) {
                     $prjLine = $slnContent[ $i ]
-                    if ( $prjLine.EndsWith( "EndProject" ) ) {
+                    if ( $prjLine.TrimStart().EndsWith( "EndProject" ) ) {
                         break
                     }
                 }
@@ -506,7 +577,10 @@ function Copy-Projects
         $slnRewritten = @()
         for ($i = 0; $i -lt $slnContent.Count; $i++) {
             $prjLine = $slnContent[ $i ]
-            if ( $prjLine.StartsWith( "Project" ) ) {
+
+
+
+            if ( $prjLine.TrimStart().StartsWith( "Project" ) ) {
                 $excludePrj = $false
 
                 foreach( $guid in $prjGuids ) {
@@ -529,11 +603,11 @@ function Copy-Projects
                         $slnRewritten += $prjLine
                     }
 
-                    if ( $prjLine.EndsWith( "EndProject" ) ) {
+                    if ( $prjLine.TrimEnd().EndsWith( "EndProject" ) ) {
                         break
                     }
                 }
-            } elseif ( $prjLine.StartsWith( "Global" ) ) {
+            } elseif ( $prjLine.TrimStart().StartsWith( "Global" ) ) {
                 for ( ; $i -lt $slnContent.Count; $i++) {
                     $excludePrj = $false
                     $prjLine = $slnContent[ $i ]
@@ -548,7 +622,7 @@ function Copy-Projects
                         $slnRewritten += $prjLine
                     }
 
-                    if ( $prjLine.EndsWith( "EndGlobal" ) ) {
+                    if ( $prjLine.TrimEnd().EndsWith( "EndGlobal" ) ) {
                         break
                     }
                 }
@@ -604,12 +678,10 @@ function Make-TracyProject
         $projectDst = "$projectName\build\win32"
     }
     $destDirAbs = Join-Path -Path $PSScriptRoot -ChildPath $projectDst
-    if ( -Not ( Test-Path -Path "$destDirAbs" -PathType Container ) ) {
-        New-Item -Path "$destDirAbs" -ItemType Directory -Force | Out-Null
-    }
+    New-Item -Path "$destDirAbs" -ItemType Directory -Force | Out-Null
 
     $binDstAbs = Join-Path -Path "$PSScriptRoot" -ChildPath "$binDstRel"
-    Push-Location $destDirAbs
+    Push-Location "$destDirAbs"
     $binDst = Resolve-Path -Path "$binDstAbs" -Relative
     Pop-Location
 
@@ -673,10 +745,22 @@ function Make-TracyProject
 function ServerapiGen-Header
 {
     param(
+        [string]$basePath,
         [string]$filename,
         [string]$commonPath,
         [string]$serverPath
     )
+
+    New-Item -Path "$filename" -ItemType File | Out-Null
+
+    $absFilename = Convert-Path -Path "$filename"
+    $publicPath = Join-Path -Path "$basePath" -ChildPath "public"
+
+    Push-Location (Split-Path -Path "$absFilename" -Parent)
+    $relCommonPath = ( Resolve-Path -Path "$commonPath" -Relative ).Replace( '\', '/' )
+    $relPublicPath = ( Resolve-Path -Path "$publicPath" -Relative ).Replace( '\', '/' )
+    $relServerPath = ( Resolve-Path -Path "$serverPath" -Relative ).Replace( '\', '/' )
+    Pop-Location
 
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "/* ============================================= */" | Out-File -Encoding ascii -FilePath "$filename" -Append
@@ -695,7 +779,7 @@ function ServerapiGen-Header
     "#ifdef TRACY_ENABLE" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
-    "#include `"../public/TracyFeatureDefines.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#include `"$relPublicPath/TracyFeatureDefines.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
@@ -734,8 +818,38 @@ function ServerapiGen-Header
     "#   endif // if TRACY_OVERRIDE_PROCESS_FORCE_INCLUDES" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
-    Get-ChildItem "$serverPath" -Filter "*.hpp" | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
-    Get-ChildItem "$serverPath" -Filter "*.h"   | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    "#   define __TRACYSORT_HPP__" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#   include `"$relServerPath/tracy_pdqsort.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    namespace ppqsort {" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    namespace execution {" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    class sequenced_policy {};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    class parallel_policy {};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    class sequenced_policy_force_branchless {};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    class parallel_policy_force_branchless {};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    inline constexpr sequenced_policy seq{};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    inline constexpr parallel_policy par{};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    inline constexpr sequenced_policy_force_branchless seq_force_branchless{};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    inline constexpr parallel_policy_force_branchless par_force_branchless{};" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    template<typename T, typename U>" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    inline constexpr bool _is_same_decay_v = std::is_same_v<std::decay_t<T>, std::decay_t<U>>;" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    } // namespace execution" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    template <typename ExecutionPolicy, typename RandomIt>" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    void sort( ExecutionPolicy&& policy, RandomIt begin, RandomIt end ) {" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "       ::tracy::pdqsort_branchless( begin, end );" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    }" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    template <typename ExecutionPolicy, typename RandomIt, typename Compare>" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    void sort( ExecutionPolicy&& policy, RandomIt begin, RandomIt end, Compare comp ) {" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "        ::tracy::pdqsort_branchless( begin, end, comp );" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    }" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "    } // namespace ppqsort" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    Get-ChildItem "$serverPath" -Filter "*.hpp" | Foreach-Object { "#   include `"$relServerPath/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    Get-ChildItem "$serverPath" -Filter "*.h"   | Foreach-Object { "#   include `"$relServerPath/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
@@ -758,10 +872,22 @@ function ServerapiGen-Header
 function ServerapiGen-Source
 {
     param(
+        [string]$basePath,
         [string]$filename,
         [string]$commonPath,
         [string]$serverPath
     )
+
+    New-Item -Path "$filename" -ItemType File | Out-Null
+
+    $absFilename = Convert-Path -Path "$filename"
+    $publicPath = Join-Path -Path "$basePath" -ChildPath "public"
+
+    Push-Location (Split-Path -Path "$absFilename" -Parent)
+    $relCommonPath = ( Resolve-Path -Path "$commonPath" -Relative ).Replace( '\', '/' )
+    $relPublicPath = ( Resolve-Path -Path "$publicPath" -Relative ).Replace( '\', '/' )
+    $relServerPath = ( Resolve-Path -Path "$serverPath" -Relative ).Replace( '\', '/' )
+    Pop-Location
 
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "/* ============================================= */" | Out-File -Encoding ascii -FilePath "$filename" -Append
@@ -775,7 +901,7 @@ function ServerapiGen-Source
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
-    "#include `"../public/TracyFeatureDefines.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "#include `"$relPublicPath/TracyFeatureDefines.h`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
@@ -807,18 +933,21 @@ function ServerapiGen-Source
     if ( Test-Path -Path "$tracyStackFrames" ) {
         "//  IMPORTANT: This must be the opposite condition of the one found in TracyClient.cpp! (If you get link errors check it)" | Out-File -Encoding ascii -FilePath "$filename" -Append
         "#   if !defined(TRACY_HAS_CALLSTACK) || !(TRACY_HAS_CALLSTACK == 2 || TRACY_HAS_CALLSTACK == 3 || TRACY_HAS_CALLSTACK == 4 || TRACY_HAS_CALLSTACK == 6)" | Out-File -Encoding ascii -FilePath "$filename" -Append
-        "#       include `"../public/common/TracyStackFrames.cpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+        "#       include `"$relCommonPath/TracyStackFrames.cpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
         "#   endif" | Out-File -Encoding ascii -FilePath "$filename" -Append
     }
 
     if ( Test-Path -Path "$tracyLz4Hc" ) {
         "" | Out-File -Encoding ascii -FilePath "$filename" -Append
-        "#   include `"../public/common/tracy_lz4hc.cpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
+        "#   include `"$relCommonPath/tracy_lz4hc.cpp`"" | Out-File -Encoding ascii -FilePath "$filename" -Append
     }
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
-    Get-ChildItem "$serverPath" -Filter "*.cpp" | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
-    Get-ChildItem "$serverPath" -Filter "*.c"   | Foreach-Object { "#   include `"../server/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    "#   define tracy_zdict_include_relative" | Out-File -Encoding ascii -FilePath "$filename" -Append
+    "" | Out-File -Encoding ascii -FilePath "$filename" -Append
+
+    Get-ChildItem "$serverPath" -Filter "*.cpp" | Foreach-Object { "#   include `"$relServerPath/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
+    Get-ChildItem "$serverPath" -Filter "*.c"   | Foreach-Object { "#   include `"$relServerPath/$_`"" | Out-File -Encoding ascii -FilePath "$filename" -Append }
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
     "" | Out-File -Encoding ascii -FilePath "$filename" -Append
 
@@ -895,6 +1024,7 @@ if ( $help ) {
         }
 
         if ( $serverapi -or $makeAll ) {
+            $basePath = "$PSScriptRoot"
             $apiCpp = Join-Path -Path "$PSScriptRoot" -ChildPath "serverapi/TracyServerApiGen.cpp"
             $apiHpp = Join-Path -Path "$PSScriptRoot" -ChildPath "serverapi/TracyServerApiGen.hpp"
 
@@ -909,8 +1039,8 @@ if ( $help ) {
             $commonPath = Join-Path -Path "$PSScriptRoot" -ChildPath "public/common"
             $serverPath = Join-Path -Path "$PSScriptRoot" -ChildPath "server"
 
-            ServerapiGen-Header $apiHpp $commonPath $serverPath
-            ServerapiGen-Source $apiCpp $commonPath $serverPath
+            ServerapiGen-Header $basePath $apiHpp $commonPath $serverPath
+            ServerapiGen-Source $basePath $apiCpp $commonPath $serverPath
         }
 
         if ( -not $profilerSuccess ) {

@@ -23,7 +23,7 @@ static const char *FormatPlotAxisMinMax( double val, PlotValueFormatting format 
     return FormatPlotValue( val, format );
 }
 
-bool View::DrawPlot( const TimelineContext &ctx, PlotData &plot, const std::vector<uint32_t> &plotDraw, uint32_t iBegin, uint32_t iEnd, int &offset, double yAxisMax, uint32_t flags, int height )
+bool View::DrawPlot( const TimelineContext &ctx, PlotData &plot, const std::vector<uint32_t> &plotDraw, uint32_t iBegin, uint32_t iEnd, int &offset, bool rightEnd, double yAxisMax, uint32_t flags, int height )
 {
     auto draw = ImGui::GetWindowDrawList();
     const auto& wpos = ctx.wpos;
@@ -115,11 +115,11 @@ bool View::DrawPlot( const TimelineContext &ctx, PlotData &plot, const std::vect
 				}
 				case PlotDrawType::Step:
                 {
-					if ( plot.fill )
+                    if( plot.fill )
                     {
                         draw->AddRectFilled( dpos + ImVec2( px, offset + PlotHeight ), dpos + ImVec2( x, offset + py ), fill );
                     }
-					const ImVec2 data[ 3 ] = { dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + py ), dpos + ImVec2( x, offset + y ) };
+                    const ImVec2 data[3] = { dpos + ImVec2( px, offset + py ), dpos + ImVec2( x, offset + py ), dpos + ImVec2( x, offset + y ) };
                     draw->AddPolyline( data, 3, color, 0, 1.0f );
 					break;
                 }
@@ -207,13 +207,41 @@ bool View::DrawPlot( const TimelineContext &ctx, PlotData &plot, const std::vect
             }
         }
 
+        if( rightEnd )
+        {
+            const auto lastTime = m_worker.GetLastTime();
+            if( lastTime > m_vd.zvStart )
+            {
+                double y;
+                double x0 = 0;
+                const auto x1 = std::min<double>( ( lastTime - m_vd.zvStart ) * pxns, w );
+
+                if( plotDraw.empty() )
+                {
+                    y = PlotHeight * 0.5;
+                    DrawLine( draw, dpos + ImVec2( 0, offset + y ), dpos + ImVec2( x1, offset + y ), color );
+                }
+                else
+                {
+                    x0 = ( plot.data.back().time.Val() - m_vd.zvStart ) * pxns;
+                    y = PlotHeight - ( plot.data.back().val - min ) * revrange * PlotHeight;
+                    DrawLine( draw, dpos + ImVec2( x0, offset + y ), dpos + ImVec2( x1, offset + y ), color );
+                }
+
+                if( plot.fill )
+                {
+                    draw->AddRectFilled( dpos + ImVec2( x0, offset + PlotHeight ), dpos + ImVec2( x1, offset + y ), fill );
+                }
+            }
+        }
+
         if ( flags & DrawPlotFlags::AddBackground )
         {
             auto tmp = FormatPlotAxisMinMax( max, plot.format );
-        DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
-        offset += PlotHeight - ty;
+            DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
+            offset += PlotHeight - ty;
             tmp = FormatPlotAxisMinMax( min, plot.format );
-        DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
+            DrawTextSuperContrast( draw, wpos + ImVec2( 0, offset ), color, tmp );
         }
         else
         {

@@ -46,6 +46,34 @@
 #       define tracy_force_inline_process
 #   endif // if TRACY_OVERRIDE_PROCESS_FORCE_INCLUDES
 
+#   define __TRACYSORT_HPP__
+#   include "../server/tracy_pdqsort.h"
+
+    namespace ppqsort {
+
+    namespace execution {
+    class sequenced_policy {};
+    class parallel_policy {};
+    class sequenced_policy_force_branchless {};
+    class parallel_policy_force_branchless {};
+    inline constexpr sequenced_policy seq{};
+    inline constexpr parallel_policy par{};
+    inline constexpr sequenced_policy_force_branchless seq_force_branchless{};
+    inline constexpr parallel_policy_force_branchless par_force_branchless{};
+    template<typename T, typename U>
+    inline constexpr bool _is_same_decay_v = std::is_same_v<std::decay_t<T>, std::decay_t<U>>;
+    } // namespace execution
+
+    template <typename ExecutionPolicy, typename RandomIt>
+    void sort( ExecutionPolicy&& policy, RandomIt begin, RandomIt end ) {
+       ::tracy::pdqsort_branchless( begin, end );
+    }
+    template <typename ExecutionPolicy, typename RandomIt, typename Compare>
+    void sort( ExecutionPolicy&& policy, RandomIt begin, RandomIt end, Compare comp ) {
+        ::tracy::pdqsort_branchless( begin, end, comp );
+    }
+    } // namespace ppqsort
+
 #   include "../server/TracyCharUtil.hpp"
 #   include "../server/TracyEvent.hpp"
 #   include "../server/TracyFileHeader.hpp"

@@ -42,7 +42,8 @@ void TimelineItemGpu::HeaderTooltip( const char* label ) const
     const bool isMultithreaded =
         ( m_gpu->type == GpuContextType::Vulkan ) ||
         ( m_gpu->type == GpuContextType::OpenCL ) ||
-        ( m_gpu->type == GpuContextType::Direct3D12 );
+        ( m_gpu->type == GpuContextType::Direct3D12 ) ||
+        ( m_gpu->type == GpuContextType::Metal );
 
     char buf[64];
     sprintf( buf, "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
@@ -139,15 +140,6 @@ void TimelineItemGpu::HeaderExtraContents( const TimelineContext& ctx, int offse
     }
 }
 
-void TimelineItemGpu::HeaderExtraPopupItems()
-{
-    if ( ImGui::MenuItem( ICON_FA_MICROCHIP " Generate CPU zones" ) )
-    {
-        m_worker.CreateZonesFromGpuData();
-        ImGui::CloseCurrentPopup();
-    }
-}
-
 int64_t TimelineItemGpu::RangeBegin() const
 {
     int64_t t = std::numeric_limits<int64_t>::max();
@@ -202,6 +194,15 @@ int64_t TimelineItemGpu::RangeEnd() const
 bool TimelineItemGpu::DrawContents( const TimelineContext& ctx, int& offset )
 {
     return m_view.DrawGpu( ctx, *m_gpu, offset );
+}
+
+void TimelineItemGpu::DrawExtraPopupItems()
+{
+    if ( ImGui::MenuItem( ICON_FA_MICROCHIP " Generate CPU zones" ) )
+    {
+        m_worker.CreateZonesFromGpuData();
+        ImGui::CloseCurrentPopup();
+    }
 }
 
 }

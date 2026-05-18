@@ -13,11 +13,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 #include <utility>
 #include <vector>
-
-#include <sys/stat.h>
+#include <zstd.h>
 
 #ifdef _MSC_VER
 #  define stat64 _stat64
@@ -32,7 +32,6 @@
 #include "../public/common/TracyYield.hpp"
 #include "../public/common/tracy_lz4.hpp"
 #include "../public/common/TracyForceInline.hpp"
-#include "../zstd/zstd.h"
 
 namespace tracy
 {
@@ -496,7 +495,7 @@ private:
 #endif // if defined( TRACY_NO_EXCEPTIONS )
         }
 
-        m_data = (char*)mmap( nullptr, m_dataSize, PROT_READ, MAP_SHARED, fileno( f ), 0 );
+        m_data = (char*)mmap( nullptr, m_dataSize, PROT_READ, MAP_SHARED, _fileno( f ), 0 );
         fclose( f );
         if( !m_data )
         {
@@ -519,9 +518,9 @@ private:
             uptr->thread = std::thread( [ptr = uptr.get()] { Worker( ptr ); } );
             m_streams.emplace_back( std::move( uptr ) );
             m_dataOffset += sz;
-       }
+        }
 
-       GetNextDataBlock();
+        GetNextDataBlock();
     }
 
     tracy_force_inline uint32_t ReadBlockSize()

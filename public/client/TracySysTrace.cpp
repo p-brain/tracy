@@ -289,8 +289,11 @@ void WINAPI EventRecordCallback( PEVENT_RECORD record )
             MemWrite( &item->contextSwitch.oldThread, cswitch->oldThreadId );
             MemWrite( &item->contextSwitch.newThread, cswitch->newThreadId );
             MemWrite( &item->contextSwitch.cpu, record->BufferContext.ProcessorNumber );
-            MemWrite( &item->contextSwitch.reason, cswitch->oldThreadWaitReason );
-            MemWrite( &item->contextSwitch.state, cswitch->oldThreadState );
+            MemWrite( &item->contextSwitch.oldThreadWaitReason, cswitch->oldThreadWaitReason );
+            MemWrite( &item->contextSwitch.oldThreadState, cswitch->oldThreadState );
+            MemWrite( &item->contextSwitch.newThreadPriority, cswitch->newThreadPriority );
+            MemWrite( &item->contextSwitch.oldThreadPriority, cswitch->oldThreadPriority );
+            MemWrite( &item->contextSwitch.previousCState, cswitch->previousCState );
             Profiler::QueueSysFinish();
 
             ReadPcmDataFromExtendedData( record );
@@ -301,8 +304,10 @@ void WINAPI EventRecordCallback( PEVENT_RECORD record )
 
             QueueItem *item = Profiler::QueueSys( QueueType::ThreadWakeup );
             MemWrite( &item->threadWakeup.time, hdr.TimeStamp.QuadPart );
+            MemWrite( &item->threadWakeup.cpu, record->BufferContext.ProcessorNumber );
             MemWrite( &item->threadWakeup.thread, rt->threadId );
-            MemWrite( &item->threadWakeup.readyingCpu, record->BufferContext.ProcessorNumber );
+            MemWrite( &item->threadWakeup.adjustReason, rt->adjustReason );
+            MemWrite( &item->threadWakeup.adjustIncrement, rt->adjustIncrement );
             Profiler::QueueSysFinish();
         }
         else if( hdr.EventDescriptor.Opcode == 1 || hdr.EventDescriptor.Opcode == 3 )
@@ -388,7 +393,7 @@ void WINAPI EventRecordCallbackVsync( PEVENT_RECORD record )
     const auto& hdr = record->EventHeader;
     if ( ( hdr.ProviderId.Data1 == 0x802EC45A ) && ( hdr.EventDescriptor.Id == 0x0011 ) )
     {
-        const auto vs = ( const VSyncInfo * ) record->UserData;
+        const auto vs = (const VSyncInfo*)record->UserData;
 
         QueueItem *item = Profiler::QueueSys( QueueType::FrameVsync );
         MemWrite( &item->frameVsync.time, hdr.TimeStamp.QuadPart );
@@ -447,10 +452,10 @@ static void SetupUserModeTrace()
         EVENT_FILTER_EVENT_ID fe = {};
         fe.FilterIn = TRUE;
         fe.Count = 1;
-        fe.Events[ 0 ] = 0x0011;  // VSyncDPC_Info
+        fe.Events[0] = 0x0011;  // VSyncDPC_Info
 
         EVENT_FILTER_DESCRIPTOR desc = {};
-        desc.Ptr = ( ULONGLONG ) &fe;
+        desc.Ptr = (ULONGLONG)&fe;
         desc.Size = sizeof( fe );
         desc.Type = EVENT_FILTER_TYPE_EVENT_ID;
 
@@ -462,7 +467,7 @@ static void SetupUserModeTrace()
         params.FilterDescCount = 1;
 
         uint64_t mask = 0x4000000000000001;   // Microsoft_Windows_DxgKrnl_Performance | Base
-        if ( EnableTraceEx2( s_traceHandleVsync, &DxgKrnlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_INFORMATION, mask, mask, 0, &params ) != ERROR_SUCCESS )
+        if( EnableTraceEx2( s_traceHandleVsync, &DxgKrnlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_INFORMATION, mask, mask, 0, &params ) != ERROR_SUCCESS )
         {
             tracy_free( s_propVsync );
             return;
@@ -799,11 +804,11 @@ void SysTraceGetExternalName( uint64_t thread, const char*& threadName, const ch
         if( _GetThreadDescription )
         {
             PWSTR tmp;
-            _GetThreadDescription( hnd, &tmp );
-            char buf[256];
-            if( tmp )
+            if ( SUCCEEDED( _GetThreadDescription( hnd, &tmp ) ) )
             {
+                char buf[256];
                 auto ret = wcstombs( buf, tmp, 256 );
+                LocalFree(tmp);
                 if( ret != 0 )
                 {
                     threadName = CopyString( buf, ret );
@@ -979,7 +984,7 @@ enum TraceEventId
     EventBranchMiss,
     EventVsync,
     EventContextSwitch,
-    EventWakeup,
+    EventWaking,
 };
 
 static void ProbePreciseIp( perf_event_attr& pe, unsigned long long config0, unsigned long long config1, pid_t pid )
@@ -1068,16 +1073,16 @@ bool SysTraceStart( int64_t& samplingPeriod )
     TracyDebug( "perf_event_paranoid: %i\n", paranoidLevel );
 #endif
 
-    int switchId = -1, wakeupId = -1, vsyncId = -1;
+    int switchId = -1, wakingId = -1, vsyncId = -1;
     const auto switchIdStr = ReadFile( "/sys/kernel/debug/tracing/events/sched/sched_switch/id" );
     if( switchIdStr ) switchId = atoi( switchIdStr );
-    const auto wakeupIdStr = ReadFile( "/sys/kernel/debug/tracing/events/sched/sched_wakeup/id" );
-    if( wakeupIdStr ) wakeupId = atoi( wakeupIdStr );
+    const auto wakingIdStr = ReadFile( "/sys/kernel/debug/tracing/events/sched/sched_waking/id" );
+    if( wakingIdStr ) wakingId = atoi( wakingIdStr );
     const auto vsyncIdStr = ReadFile( "/sys/kernel/debug/tracing/events/drm/drm_vblank_event/id" );
     if( vsyncIdStr ) vsyncId = atoi( vsyncIdStr );
 
     TracyDebug( "sched_switch id: %i\n", switchId );
-    TracyDebug( "sched_wakeup id: %i\n", wakeupId );
+    TracyDebug( "sched_waking id: %i\n", wakingId );
     TracyDebug( "drm_vblank_event id: %i\n", vsyncId );
 
 #ifdef TRACY_NO_SAMPLING
@@ -1132,7 +1137,7 @@ bool SysTraceStart( int64_t& samplingPeriod )
         2 +     // CPU cycles + instructions retired
         2 +     // cache reference + miss
         2 +     // branch retired + miss
-        2 +     // context switches + wakeups
+        2 +     // context switches + waking ups
         1       // vsync
     );
     s_ring = (RingBuffer*)tracy_malloc( sizeof( RingBuffer ) * maxNumBuffers );
@@ -1377,18 +1382,31 @@ bool SysTraceStart( int64_t& samplingPeriod )
             }
         }
 
-        if( wakeupId != -1 )
+        if( wakingId != -1 )
         {
-            pe.config = wakeupId;
-            pe.config &= ~PERF_SAMPLE_CALLCHAIN;
+            pe = {};
+            pe.type = PERF_TYPE_TRACEPOINT;
+            pe.size = sizeof( perf_event_attr );
+            pe.sample_period = 1;
+            pe.sample_type = PERF_SAMPLE_TIME | PERF_SAMPLE_RAW;
+            // Coult ask for callstack here
+            //pe.sample_type |= PERF_SAMPLE_CALLCHAIN;
+            pe.disabled = 1;
+            pe.inherit = 1;
+            pe.config = wakingId;
+            pe.read_format = 0;
+#if !defined TRACY_HW_TIMER || !( defined __i386 || defined _M_IX86 || defined __x86_64__ || defined _M_X64 )
+            pe.use_clockid = 1;
+            pe.clockid = CLOCK_MONOTONIC_RAW;
+#endif
 
-            TracyDebug( "Setup wakeup capture\n" );
+            TracyDebug( "Setup waking up capture\n" );
             for( int i=0; i<s_numCpus; i++ )
             {
                 const int fd = perf_event_open( &pe, -1, i, -1, PERF_FLAG_FD_CLOEXEC );
                 if( fd != -1 )
                 {
-                    new( s_ring+s_numBuffers ) RingBuffer( 64*1024, fd, EventWakeup, i );
+                    new( s_ring+s_numBuffers ) RingBuffer( 64*1024, fd, EventWaking, i );
                     if( s_ring[s_numBuffers].IsValid() )
                     {
                         s_numBuffers++;
@@ -1633,6 +1651,7 @@ void SysTraceWorker( void* ptr )
                 hadData = true;
                 while( activeNum > 0 )
                 {
+                    // Find the earliest event from the active buffers
                     int sel = -1;
                     int selPos;
                     int64_t t0 = std::numeric_limits<int64_t>::max();
@@ -1670,6 +1689,7 @@ void SysTraceWorker( void* ptr )
                             }
                         }
                     }
+                    // Found any event
                     if( sel >= 0 )
                     {
                         auto& ring = ringArray[ctxBufferIdx + sel];
@@ -1685,10 +1705,10 @@ void SysTraceWorker( void* ptr )
                         const auto rid = ring.GetId();
                         if( rid == EventContextSwitch )
                         {
-                            // Layout:
-                            //   u64 time
-                            //   u64 cnt
-                            //   u64 ip[cnt]
+                            // Layout: See /sys/kernel/debug/tracing/events/sched/sched_switch/format
+                            //   u64 time    // PERF_SAMPLE_TIME
+                            //   u64 cnt     // PERF_SAMPLE_CALLCHAIN
+                            //   u64 ip[cnt] // PERF_SAMPLE_CALLCHAIN
                             //   u32 size
                             //   u8  data[size]
                             // Data (not ABI stable, but has not changed since it was added, in 2009):
@@ -1709,35 +1729,43 @@ void SysTraceWorker( void* ptr )
                             const auto traceOffset = offset;
                             offset += sizeof( uint64_t ) * cnt + sizeof( uint32_t ) + 8 + 16;
 
-                            uint32_t prev_pid, next_pid;
+                            uint32_t prev_pid, prev_prio;
+                            uint32_t next_pid, next_prio;
                             long prev_state;
 
                             ring.Read( &prev_pid, offset, sizeof( uint32_t ) );
-                            offset += sizeof( uint32_t ) + sizeof( uint32_t );
+                            offset += sizeof( uint32_t );
+                            ring.Read( &prev_prio, offset, sizeof( uint32_t ) );
+                            offset += sizeof( uint32_t );
                             ring.Read( &prev_state, offset, sizeof( long ) );
                             offset += sizeof( long ) + 16;
                             ring.Read( &next_pid, offset, sizeof( uint32_t ) );
+                            offset += sizeof( uint32_t );
+                            ring.Read( &next_prio, offset, sizeof( uint32_t ) );
 
-                            uint8_t reason = 100;
-                            uint8_t state;
+                            uint8_t oldThreadWaitReason = 100;
+                            uint8_t oldThreadState;
 
-                            if(      prev_state & 0x0001 ) state = 104;
-                            else if( prev_state & 0x0002 ) state = 101;
-                            else if( prev_state & 0x0004 ) state = 105;
-                            else if( prev_state & 0x0008 ) state = 106;
-                            else if( prev_state & 0x0010 ) state = 108;
-                            else if( prev_state & 0x0020 ) state = 109;
-                            else if( prev_state & 0x0040 ) state = 110;
-                            else if( prev_state & 0x0080 ) state = 102;
-                            else                           state = 103;
+                            if(      prev_state & 0x0001 ) oldThreadState = 104;
+                            else if( prev_state & 0x0002 ) oldThreadState = 101;
+                            else if( prev_state & 0x0004 ) oldThreadState = 105;
+                            else if( prev_state & 0x0008 ) oldThreadState = 106;
+                            else if( prev_state & 0x0010 ) oldThreadState = 108;
+                            else if( prev_state & 0x0020 ) oldThreadState = 109;
+                            else if( prev_state & 0x0040 ) oldThreadState = 110;
+                            else if( prev_state & 0x0080 ) oldThreadState = 102;
+                            else                           oldThreadState = 103;
 
                             QueueItem *item = Profiler::QueueSys( QueueType::ContextSwitch );
                             MemWrite( &item->contextSwitch.time, t0 );
                             MemWrite( &item->contextSwitch.oldThread, prev_pid );
                             MemWrite( &item->contextSwitch.newThread, next_pid );
                             MemWrite( &item->contextSwitch.cpu, uint8_t( ring.GetCpu() ) );
-                            MemWrite( &item->contextSwitch.reason, reason );
-                            MemWrite( &item->contextSwitch.state, state );
+                            MemWrite( &item->contextSwitch.oldThreadWaitReason, oldThreadWaitReason );
+                            MemWrite( &item->contextSwitch.oldThreadState, oldThreadState );
+                            MemWrite( &item->contextSwitch.previousCState, uint8_t( 0 ) );
+                            MemWrite( &item->contextSwitch.newThreadPriority, int8_t( next_prio ) );
+                            MemWrite( &item->contextSwitch.oldThreadPriority, int8_t( prev_prio ) );
                             Profiler::QueueSysFinish();
 
                             if( cnt > 0 && prev_pid != 0 && CurrentProcOwnsThread( prev_pid ) )
@@ -1751,27 +1779,33 @@ void SysTraceWorker( void* ptr )
                                 Profiler::QueueSysFinish();
                             }
                         }
-                        else if( rid == EventWakeup )
+                        else if( rid == EventWaking)
                         {
+                            // See /sys/kernel/debug/tracing/events/sched/sched_waking/format
                             // Layout:
-                            //   u64 time
+                            //   u64 time // PERF_SAMPLE_TIME
                             //   u32 size
                             //   u8  data[size]
                             // Data:
                             //   u8  hdr[8]
                             //   u8  comm[16]
                             //   u32 pid
-                            //   u32 prio
-                            //   u64 target_cpu
-
-                            offset += sizeof( perf_event_header ) + sizeof( uint64_t ) + sizeof( uint32_t ) + 8 + 16;
-
+                            //   i32 prio
+                            //   i32 target_cpu
+                            const uint32_t dataOffset = sizeof( perf_event_header ) + sizeof( uint64_t ) + sizeof( uint32_t ); 
+                            offset += dataOffset + 8 + 16;
                             uint32_t pid;
                             ring.Read( &pid, offset, sizeof( uint32_t ) );
 
                             QueueItem *item = Profiler::QueueSys( QueueType::ThreadWakeup );
                             MemWrite( &item->threadWakeup.time, t0 );
                             MemWrite( &item->threadWakeup.thread, pid );
+                            MemWrite( &item->threadWakeup.cpu, (uint8_t)ring.GetCpu() );
+
+                            int8_t adjustReason = -1; // Does not exist on Linux
+                            int8_t adjustIncrement = 0; // Should perhaps store the new prio?
+                            MemWrite( &item->threadWakeup.adjustReason, adjustReason );
+                            MemWrite( &item->threadWakeup.adjustIncrement, adjustIncrement );
                             Profiler::QueueSysFinish();
                         }
                         else

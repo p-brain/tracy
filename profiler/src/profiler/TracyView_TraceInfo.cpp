@@ -3,6 +3,7 @@
 #include "TracyImGui.hpp"
 #include "TracyPrint.hpp"
 #include "TracyView.hpp"
+#include "tracy_pdqsort.h"
 
 namespace tracy
 {
@@ -716,15 +717,10 @@ void View::DrawInfo()
             const float margin = round( ty * 0.5 );
             const float small = round( sty * 0.5 );
 
-            struct CoreAndThreadCount
-            {
-                uint32_t cores;
-                int mt;
-            };
-
-            std::vector<CoreAndThreadCount> countAndMaxThreads( topology.size() );
+            std::vector<int> maxthreads( topology.size() );
 
             float ptsz = 0;
+            float dtsz = 0;
             float ctsz = 0;
             float ttsz = 0;
             for( auto& package : topology )
@@ -736,13 +732,15 @@ void View::DrawInfo()
                 ImGui::PopFont();
 
                 size_t mt = 0;
-                uint32_t coreCount = 0;
-                for ( auto& group : package.second )
+                for ( auto& die : package.second )
                 {
-                    for( auto& core : group.second )
+                    sprintf( buf, ICON_FA_DICE_D6 " Die %" PRIu32, die.first.val );
+                    const auto dsz = ImGui::CalcTextSize( buf ).x;
+                    if( dsz > dtsz ) dtsz = dsz;
+
+                    for( auto& core : die.second )
                     {
                         const Worker::CpuThreadList& threads = core.second;
-                        coreCount++;
                         sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, core.first.val );
                         const auto csz = ImGui::CalcTextSize( buf ).x;
                         if( csz > ctsz ) ctsz = csz;
@@ -758,8 +756,7 @@ void View::DrawInfo()
                         }
                     }
                 }
-                countAndMaxThreads[ package.first.val ].cores = coreCount;
-                countAndMaxThreads[ package.first.val ].mt = (int)mt;
+                maxthreads[package.first] = (int)mt;
             }
 
             const auto remainingWidth = ImGui::GetContentRegionAvail().x;
@@ -772,7 +769,7 @@ void View::DrawInfo()
             std::vector<decltype(topology.begin())> tsort;
             tsort.reserve( topology.size() );
             for( auto it = topology.begin(); it != topology.end(); ++it ) tsort.emplace_back( it );
-            std::sort( tsort.begin(), tsort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
+            pdqsort_branchless( tsort.begin(), tsort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
             for( auto& package : tsort )
             {
                 const CpuPackageId packageId = package->first;
@@ -781,57 +778,62 @@ void View::DrawInfo()
                 draw->AddText( dpos, 0xFFFFFFFF, buf );
                 dpos.y += ty;
 
-                const auto inCoreWidth = ( ttsz + margin ) * countAndMaxThreads[ packageId.val ].mt;
-                const auto coreWidth = inCoreWidth + 2 * margin;
-                const auto inCoreHeight = margin + 2 * small + ty;
-                const auto coreHeight = inCoreHeight + ty;
-                const auto cpl = std::max( 1, (int)floor( ( remainingWidth - 2 * margin ) / coreWidth ) );
-                const auto cl = ( countAndMaxThreads[ packageId.val ].cores + cpl - 1 ) / cpl;
-                const auto pw = cpl * coreWidth + 2 * margin;
-                const auto ph = margin + cl * coreHeight;
-                if( pw > width ) width = pw;
-
-                draw->AddRect( dpos, dpos + ImVec2( margin + coreWidth * std::min<size_t>( cpl, countAndMaxThreads[ packageId.val ].cores ), ph ), 0xFFFFFFFF );
-
-                std::vector<decltype(package->second.begin()->second)::const_iterator> csort;
-                csort.reserve( package->second.size() );
-                for( auto it = package->second.begin(); it != package->second.end(); ++it )
+                std::vector<decltype(package->second.begin())> dsort;
+                dsort.reserve( package->second.size() );
+                for( auto it = package->second.begin(); it != package->second.end(); ++it ) dsort.emplace_back( it );
+                pdqsort_branchless( dsort.begin(), dsort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
+                for( auto& die : dsort )
                 {
-                    for ( auto cit = it->second.begin(); cit != it->second.end(); ++cit )
+                    dpos.y += small;
+                    sprintf( buf, ICON_FA_DICE_D6 " Die %" PRIu32, die->first.val );
+                    draw->AddText( dpos, 0xFFFFFFFF, buf );
+                    dpos.y += ty;
+
+                    const auto inCoreWidth = ( ttsz + margin ) * maxthreads[package->first];
+                    const auto coreWidth = inCoreWidth + 2 * margin;
+                    const auto inCoreHeight = margin + 2 * small + ty;
+                    const auto coreHeight = inCoreHeight + ty;
+                    const auto cpl = std::max( 1, (int)floor( ( remainingWidth - 2 * margin ) / coreWidth ) );
+                    const auto cl = ( die->second.size() + cpl - 1 ) / cpl;
+                    const auto pw = cpl * coreWidth + 2 * margin;
+                    const auto ph = margin + cl * coreHeight;
+                    if( pw > width ) width = pw;
+
+                    draw->AddRect( dpos, dpos + ImVec2( margin + coreWidth * std::min<size_t>( cpl, die->second.size() ), ph ), 0xFFFFFFFF );
+
+                    std::vector<decltype(die->second.begin())> csort;
+                    csort.reserve( die->second.size() );
+                    for( auto it = die->second.begin(); it != die->second.end(); ++it ) csort.emplace_back( it );
+                    pdqsort_branchless( csort.begin(), csort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
+                    auto cpos = dpos + ImVec2( margin, margin );
+                    int ll = cpl;
+                    for( auto& core : csort )
                     {
-                        csort.emplace_back( cit );
+                        const CpuCoreId coreId = core->first;
+                        const Worker::CpuThreadList& threads = core->second;
+                        sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, coreId.val );
+                        draw->AddText( cpos, 0xFFFFFFFF, buf );
+                        draw->AddRect( cpos + ImVec2( 0, ty ), cpos + ImVec2( inCoreWidth + small, inCoreHeight + small ), 0xFFFFFFFF );
+
+                        for( int i = 0; i < threads.size(); i++ )
+                        {
+                            sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, threads[i].val );
+                            draw->AddText( cpos + ImVec2( margin + i * ( margin + ttsz ), ty + small ), 0xFFFFFFFF, buf );
+                        }
+
+                        if( --ll == 0 )
+                        {
+                            ll = cpl;
+                            cpos.x -= (cpl-1) * coreWidth;
+                            cpos.y += coreHeight;
+                        }
+                        else
+                        {
+                            cpos.x += coreWidth;
+                        }
                     }
+                    dpos.y += ph;
                 }
-
-                std::sort( csort.begin(), csort.end(), [] ( const auto& l, const auto& r ) { return l->first < r->first; } );
-                auto cpos = dpos + ImVec2( margin, margin );
-                int ll = cpl;
-                for( auto& core : csort )
-                {
-                    const CpuCoreId coreId = core->first;
-                    const Worker::CpuThreadList& threads = core->second;
-                    sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, coreId.val );
-                    draw->AddText( cpos, 0xFFFFFFFF, buf );
-                    draw->AddRect( cpos + ImVec2( 0, ty ), cpos + ImVec2( inCoreWidth + small, inCoreHeight + small ), 0xFFFFFFFF );
-
-                    for( int i = 0; i < threads.size(); i++ )
-                    {
-                        sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, threads[i].val );
-                        draw->AddText( cpos + ImVec2( margin + i * ( margin + ttsz ), ty + small ), 0xFFFFFFFF, buf );
-                    }
-
-                    if( --ll == 0 )
-                    {
-                        ll = cpl;
-                        cpos.x -= (cpl-1) * coreWidth;
-                        cpos.y += coreHeight;
-                    }
-                    else
-                    {
-                        cpos.x += coreWidth;
-                    }
-                }
-                dpos.y += ph;
             }
             ImGui::ItemSize( ImVec2( width, dpos.y - origy ) );
             ImGui::TreePop();
@@ -861,19 +863,51 @@ void View::DrawInfo()
 
                 ImFont* tooltipFont = ImGui::GetFont();
 
+                const Vector< Worker::CpuThreadTopology> &coreInfos = m_worker.GetTopoCoreInfos();
+
                 char buf[ 512 ];
                 for( auto& package : topology )
                 {
                     const CpuPackageId packageId = package.first;
                     ImGui::Text( ICON_FA_BOX " Package %" PRIu32, packageId.val );
 
-                    uint32_t groupCount = 0;
-                    for ( auto& group : package.second )
+                    struct PackageGroup
                     {
-                        if ( !group.second.empty() )
+                        uint32_t id;
+                        std::vector< const Worker::CpuThreadTopology * > topo;
+                    };
+                    std::vector< PackageGroup > uniqueGroups;
+
+
+                    uint32_t groupCount = 0;
+                    {
+                        const Vector< Worker::CpuThreadTopology> &coreInfos = m_worker.GetTopoCoreInfos();
+                        for ( const Worker::CpuThreadTopology &info : coreInfos )
                         {
-                            groupCount++;
+                            if ( info.package == packageId )
+                            {
+                                size_t groupIdx = 0;
+                                bool foundGroupId = false;
+                                for ( groupIdx = 0; groupIdx < uniqueGroups.size(); groupIdx++ )
+                                {
+                                    if ( uniqueGroups[ groupIdx ].id == info.group )
+                                    {
+                                        foundGroupId = true;
+                                        break;
+                                    }
+                                }
+
+                                if ( !foundGroupId )
+                                {
+                                    groupIdx = uniqueGroups.size();
+                                    uniqueGroups.push_back( PackageGroup{ info.group } );
+                                }
+
+                                uniqueGroups[ groupIdx ].topo.push_back( &info );
+                            }
                         }
+               
+                        groupCount = uniqueGroups.size();
                     }
 
                     ImVec2 perGroupAvail( 0, 0 );
@@ -886,9 +920,9 @@ void View::DrawInfo()
                         perGroupAvail = ImVec2( avail.x, ( avail.y - groupHeaderHeight ) / groupCount );
                     }
 
-                    for ( auto& group : package.second )
+                    for ( const PackageGroup& pg : uniqueGroups )
                     {
-                        if ( group.second.empty() )
+                        if ( pg.topo.empty() )
                         {
                             continue;
                         }
@@ -899,7 +933,7 @@ void View::DrawInfo()
                         ImGui::PushFont( m_fixedFont );
                         for ( const Worker::CpuCacheInfo *cache = cacheList; cache; cache = cache->next )
                         {
-                            if ( ( cache->package == packageId ) && ( cache->group == group.first ) )
+                            if ( ( cache->package == packageId ) && ( cache->group == pg.id ) )
                             {
                                 groupCaches.push_back( cache );
 
@@ -917,12 +951,11 @@ void View::DrawInfo()
                         ImGui::PopFont();
 
                         std::vector<const Worker::CpuThreadTopology*> coreInfos;
-                        coreInfos.reserve( group.second.size() );
+                        coreInfos.reserve( pg.topo.size() );
 
                         ImVec2 cellDim( 0, ImGui::GetTextLineHeight() );
-                        for ( auto& core : group.second )
+                        for ( const Worker::CpuThreadTopology* topo : pg.topo )
                         {
-                            const Worker::CpuThreadTopology* topo = m_worker.GetThreadTopology( core.first );
                             if ( topo )
                             {
                                 coreInfos.push_back( topo );
@@ -937,7 +970,7 @@ void View::DrawInfo()
                                       return lhs->core < rhs->core;
                                   });
 
-                        ImGui::Text( " Group: %" PRIu32, group.first );
+                        ImGui::Text( " Group: %" PRIu32, pg.id );
                         ImGuiTableFlags tableFlags = ImGuiTableFlags_SizingFixedFit
                             | ImGuiTableFlags_Borders
                             | ImGuiTableFlags_NoHostExtendX
@@ -961,7 +994,7 @@ void View::DrawInfo()
                         const ImVec2 outerSize_ = ImMin( fullTableSize, perGroupAvail );
                         const ImVec2 outerSize = ImMax( outerSize_, minTableSize );
 
-                        if ( ImGui::BeginTable( "##CacheTopoTable" , (int)group.second.size() + 1, tableFlags, outerSize) )
+                        if ( ImGui::BeginTable( "##CacheTopoTable" , (int)pg.topo.size() + 1, tableFlags, outerSize) )
                         {
                             ImGui::PushFont( m_fixedFont );
 

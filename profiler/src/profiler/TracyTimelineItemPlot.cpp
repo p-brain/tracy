@@ -5,6 +5,7 @@
 #include "TracyUtility.hpp"
 #include "TracyView.hpp"
 #include "TracyWorker.hpp"
+#include "tracy_pdqsort.h"
 
 namespace tracy
 {
@@ -33,7 +34,6 @@ TimelineItemPlot::TimelineItemPlot( View& view, Worker& worker, PlotData* plot )
     m_resizeBar.colActive = ImVec4( 0.9f, 1.0f, 0.9f, 1.0f );
     m_resizeBar.colHover = ImVec4( 0.8f, 0.8f, 0.8f, 1.0f );
 }
-
 
 bool TimelineItemPlot::IsEmpty() const
 {
@@ -124,7 +124,7 @@ void TimelineItemPlot::HeaderTooltip( const char* label ) const
         TextFocused( "Last event at", TimeToString( last ) );
         TextFocused( "Activity time:", TimeToString( activity ) );
         ImGui::SameLine();
-        char buf[ 64 ];
+        char buf[64];
         PrintStringPercent( buf, activity / double( traceLen ) * 100 );
         TextDisabledUnformatted( buf );
         ImGui::Separator();
@@ -137,7 +137,7 @@ void TimelineItemPlot::HeaderTooltip( const char* label ) const
 
         const auto it = std::lower_bound( plot->data.begin(), plot->data.end(), last - 1000000000ll * 10, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
         const auto tr10 = last - it->time.Val();
-        if ( tr10 != 0 )
+        if( tr10 != 0 )
         {
             TextFocused( "D/s (10s):", RealToString( double( std::distance( it, plot->data.end() ) ) / tr10 * 1000000000ll ) );
         }
@@ -189,7 +189,7 @@ int64_t TimelineItemPlot::RangeEnd() const
     return retVal;
 }
 
-bool TimelineItemPlot::DrawContents( const TimelineContext &ctx, int &offset )
+bool TimelineItemPlot::DrawContents( const TimelineContext& ctx, int& offset )
 {
     uint32_t flags = View::DrawPlotFlags::AddBackground;
     if ( m_plot->nextPlot != nullptr )
@@ -201,13 +201,13 @@ bool TimelineItemPlot::DrawContents( const TimelineContext &ctx, int &offset )
         for ( PlotData *plot = m_plot; plot != nullptr; plot = plot->nextPlot, nPlot++ )
         {
             offset = initialOffset;
-            m_view.DrawPlot( ctx, *plot, m_draw, m_plotLines[ nPlot ].m_begin, m_plotLines[ nPlot ].m_end, offset, m_bUseFixedMax ? m_userMax : m_max, flags, m_resizeBar.height );
+            m_view.DrawPlot( ctx, *plot, m_draw, m_plotLines[ nPlot ].m_begin, m_plotLines[ nPlot ].m_end, offset, m_rightEnd, m_bUseFixedMax ? m_userMax : m_max, flags, m_resizeBar.height );
             flags &= ~View::DrawPlotFlags::AddBackground;
         }
     }
     else
     {
-        m_view.DrawPlot( ctx, *m_plot, m_draw, m_plotLines[ 0 ].m_begin, m_plotLines[ 0 ].m_end, offset, m_bUseFixedMax ? m_userMax : m_max, flags, m_resizeBar.height );
+        m_view.DrawPlot( ctx, *m_plot, m_draw, m_plotLines[ 0 ].m_begin, m_plotLines[ 0 ].m_end, offset, m_rightEnd, m_bUseFixedMax ? m_userMax : m_max, flags, m_resizeBar.height );
     }
     return true;
 }
@@ -428,41 +428,54 @@ void TimelineItemPlot::Preprocess( const TimelineContext& ctx, TaskDispatch& td,
             p->color = s_plotColors[ std::min( s_numPlotColors-1, nPlot ) ];
 
             vec.ensure_sorted();
-            if ( vec.front().time.Val() > vEnd || vec.back().time.Val() < vStart )
+            if( vec.front().time.Val() > vEnd )
             {
                 p->rMin = 0;
                 p->rMax = 0;
                 p->num = 0;
+                m_rightEnd = false;
+                continue;
+            }
+            else if( vec.back().time.Val() < vStart )
+            {
+                const auto lastTime = m_worker.GetLastTime();
+                const auto val = vec.back().val;
+                p->rMin = val - 1;
+                p->rMax = val + 1;
+                p->num = lastTime < vStart ? 0 : 1;
+                m_rightEnd = vec.back().time.Val() < lastTime;
                 continue;
             }
 
-            auto it = std::lower_bound( vec.begin(), vec.end(), vStart, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
-            auto end = std::lower_bound( it, vec.end(), vEnd, [] ( const auto &l, const auto &r ) { return l.time.Val() < r; } );
+            auto it = std::lower_bound( vec.begin(), vec.end(), vStart, [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
+            auto end = std::lower_bound( it, vec.end(), vEnd, [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
 
-            if ( end != vec.end() ) end++;
-            if ( it != vec.begin() ) it--;
+            m_rightEnd = end == vec.end() && vec.back().time.Val() < m_worker.GetLastTime();
+
+            if( end != vec.end() ) end++;
+            if( it != vec.begin() ) it--;
 
             double min = it->val;
             double max = it->val;
             const auto num = end - it;
             if( num > 1000000 )
             {
-                min = p->min;
-                max = p->max;
+                    min = p->min;
+                    max = p->max;
             }
             else
             {
                 auto tmp = it;
-                while ( ++tmp < end )
+                while( ++tmp < end )
                 {
-                    if ( tmp->val < min ) min = tmp->val;
-                    else if ( tmp->val > max ) max = tmp->val;
+                    if( tmp->val < min ) min = tmp->val;
+                    else if( tmp->val > max ) max = tmp->val;
                 }
             }
 
             m_max = nPlot == 0 ? max : std::max( max, m_max );
 
-            if ( min == max )
+            if( min == max )
             {
                 if ( p->nextPlot == nullptr && m_max == max )
                 {
@@ -481,12 +494,12 @@ void TimelineItemPlot::Preprocess( const TimelineContext& ctx, TaskDispatch& td,
             m_draw.emplace_back( it - vec.begin() );
 
             ++it;
-            while ( it < end )
+            while( it < end )
             {
-                auto next = std::upper_bound( it, end, int64_t( it->time.Val() + MinVisNs ), [] ( const auto &l, const auto &r ) { return l < r.time.Val(); } );
+                auto next = std::upper_bound( it, end, int64_t( it->time.Val() + MinVisNs ), [] ( const auto& l, const auto& r ) { return l < r.time.Val(); } );
                 assert( next > it );
                 const auto rsz = uint32_t( next - it );
-                if ( rsz < 4 )
+                if( rsz < 4 )
                 {
                     for ( uint32_t i = 0; i < rsz; i++ )
                     {
@@ -499,36 +512,36 @@ void TimelineItemPlot::Preprocess( const TimelineContext& ctx, TaskDispatch& td,
                 {
                     // Sync with View::DrawPlot()!
                     constexpr int NumSamples = 256;
-                    uint32_t samples[ NumSamples ];
+                    uint32_t samples[NumSamples];
                     uint32_t cnt = 0;
                     uint32_t offset = it - vec.begin();
-                    if ( rsz < NumSamples )
+                    if( rsz < NumSamples )
                     {
-                        for ( cnt = 0; cnt < rsz; cnt++ )
+                        for( cnt=0; cnt<rsz; cnt++ )
                         {
-                            samples[ cnt ] = offset + cnt;
+                            samples[cnt] = offset + cnt;
                         }
                     }
                     else
                     {
                         const auto skip = ( rsz + NumSamples - 1 ) / NumSamples;
                         const auto limit = rsz / skip;
-                        for ( cnt = 0; cnt < limit; cnt++ )
+                        for( cnt=0; cnt<limit; cnt++ )
                         {
-                            samples[ cnt ] = offset + cnt * skip;
+                            samples[cnt] = offset + cnt * skip;
                         }
-                        if ( cnt == limit ) cnt--;
-                        samples[ cnt++ ] = offset + rsz - 1;
+                        if( cnt == limit ) cnt--;
+                        samples[cnt++] = offset + rsz - 1;
                     }
                     it = next;
 
-                    pdqsort_branchless( samples, samples + cnt, [ &vec ] ( const auto &l, const auto &r ) { return vec[ l ].val < vec[ r ].val; } );
+                    pdqsort_branchless( samples, samples+cnt, [&vec] ( const auto& l, const auto& r ) { return vec[l].val < vec[r].val; } );
 
                     assert( rsz > 0 );
                     m_draw.emplace_back( rsz );
                     m_draw.emplace_back( offset );
-                    m_draw.emplace_back( samples[ 0 ] );
-                    m_draw.emplace_back( samples[ cnt - 1 ] );
+                    m_draw.emplace_back( samples[0] );
+                    m_draw.emplace_back( samples[cnt-1] );
                 }
             }
             line.m_end = m_draw.size();

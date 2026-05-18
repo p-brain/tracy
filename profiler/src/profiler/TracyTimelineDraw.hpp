@@ -33,6 +33,7 @@ struct TimelineDraw
     Int48 rend;
     uint16_t comprTid;
     uint32_t num;
+    uint32_t inheritedColor;
 };
 
 

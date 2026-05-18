@@ -1,6 +1,5 @@
 P4IGNORE
 .p4ignore
-build/_generated/
 .vs/
 .git/
 .github/
@@ -8,6 +7,9 @@ build/_generated/
 *.tss
 *.vcxproj.user
 *.args.json
+build/_generated/
 build/win32/_temp
 build/win32/Debug
 build/win32/Release
+capture/build
+tracy-profiler.sln.bak

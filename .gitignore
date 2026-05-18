@@ -45,3 +45,5 @@ Directory.Build.props
 profiler/build
 capture/build
 capture/tracy-capture.exe
+serverapi/*.lib
+serverapi/*.pdb

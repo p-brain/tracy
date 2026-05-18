@@ -48,6 +48,15 @@ struct CpuPackageId
     type val = 0;
 };
 
+struct CpuDieId
+{
+    typedef uint32_t type;
+
+    operator type() const { return val; }
+
+    type val = 0;
+};
+
 struct CpuGroupId
 {
     typedef uint32_t type;
@@ -89,6 +98,15 @@ template <>
 struct hash<::tracy::CpuGroupId>
 {
     size_t operator()( ::tracy::CpuGroupId const &obj ) const noexcept
+    {
+        return hash_int( static_cast< uint64_t >( obj.val ) );
+    }
+};
+
+template <>
+struct hash<::tracy::CpuDieId>
+{
+    size_t operator()( ::tracy::CpuDieId const &obj ) const noexcept
     {
         return hash_int( static_cast< uint64_t >( obj.val ) );
     }
@@ -212,7 +230,7 @@ public:
     struct ZoneThreadData
     {
         tracy_force_inline ZoneEvent* Zone() const { return (ZoneEvent*)( _zone_thread >> 16 ); }
-        tracy_force_inline void SetZone( ZoneEvent* zone ) { assert( ( uint64_t( zone ) & 0xFFFF000000000000 ) == 0 ); memcpy( ((char*)&_zone_thread)+2, &zone, 4 ); memcpy( ((char*)&_zone_thread)+6, ((char*)&zone)+4, 2 ); }
+        tracy_force_inline void SetZone( ZoneEvent* zone ) { auto z64 = (uint64_t)zone; assert( ( z64 & 0xFFFF000000000000 ) == 0 ); memcpy( ((char*)&_zone_thread)+2, &z64, 4 ); memcpy( ((char*)&_zone_thread)+6, ((char*)&z64)+4, 2 ); }
         tracy_force_inline uint16_t Thread() const { return uint16_t( _zone_thread & 0xFFFF ); }
         tracy_force_inline void SetThread( uint16_t thread ) { memcpy( &_zone_thread, &thread, 2 ); }
 
@@ -223,7 +241,7 @@ public:
     struct GpuZoneThreadData
     {
         tracy_force_inline GpuEvent* Zone() const { return (GpuEvent*)( _zone_thread >> 16 ); }
-        tracy_force_inline void SetZone( GpuEvent* zone ) { assert( ( uint64_t( zone ) & 0xFFFF000000000000 ) == 0 ); memcpy( ((char*)&_zone_thread)+2, &zone, 4 ); memcpy( ((char*)&_zone_thread)+6, ((char*)&zone)+4, 2 ); }
+        tracy_force_inline void SetZone( GpuEvent* zone ) { auto z64 = (uint64_t)zone; assert( ( z64 & 0xFFFF000000000000 ) == 0 ); memcpy( ((char*)&_zone_thread)+2, &z64, 4 ); memcpy( ((char*)&_zone_thread)+6, ((char*)&z64)+4, 2 ); }
         tracy_force_inline uint16_t Thread() const { return uint16_t( _zone_thread & 0xFFFF ); }
         tracy_force_inline void SetThread( uint16_t thread ) { memcpy( &_zone_thread, &thread, 2 ); }
 
@@ -235,6 +253,7 @@ public:
     {
         uint64_t coreInGroupMask = 0;
         CpuPackageId package;
+        CpuDieId die;
         CpuGroupId group;
         CpuCoreId core;
         CpuType type = CpuType::Normal;
@@ -242,7 +261,7 @@ public:
 
     typedef std::vector<CpuThreadId> CpuThreadList;
     typedef unordered_flat_map<CpuCoreId, CpuThreadList> CoreToThreadLut;
-    typedef unordered_flat_map<CpuGroupId, CoreToThreadLut> GroupToCoreLut;
+    typedef unordered_flat_map<CpuDieId, CoreToThreadLut> DieToCoreLut;
 
     struct CpuCacheInfo
     {
@@ -303,7 +322,7 @@ public:
 private:
     struct SourceLocationZones
     {
-        struct ZtdSort { bool operator()( const ZoneThreadData& lhs, const ZoneThreadData& rhs ) { return lhs.Zone()->Start() < rhs.Zone()->Start(); } };
+        struct ZtdSort { bool operator()( const ZoneThreadData& lhs, const ZoneThreadData& rhs ) const { return lhs.Zone()->Start() < rhs.Zone()->Start(); } };
 
         SortedVector<ZoneThreadData, ZtdSort> zones;
         int64_t min = std::numeric_limits<int64_t>::max();
@@ -322,7 +341,7 @@ private:
 
     struct GpuSourceLocationZones
     {
-        struct GpuZtdSort { bool operator()( const GpuZoneThreadData& lhs, const GpuZoneThreadData& rhs ) { return lhs.Zone()->GpuStart() < rhs.Zone()->GpuStart(); } };
+        struct GpuZtdSort { bool operator()( const GpuZoneThreadData& lhs, const GpuZoneThreadData& rhs ) const { return lhs.Zone()->GpuStart() < rhs.Zone()->GpuStart(); } };
 
         SortedVector<GpuZoneThreadData, GpuZtdSort> zones;
         int64_t min = std::numeric_limits<int64_t>::max();
@@ -501,7 +520,7 @@ private:
 #endif
 
         Vector<CpuThreadTopology> coreInfos;
-        unordered_flat_map<CpuPackageId, GroupToCoreLut> cpuTopology;
+        unordered_flat_map<CpuPackageId, DieToCoreLut> cpuTopology;
         unordered_flat_map<CpuThreadId, CpuCoreId> cpuTopologyMap;
 
         CpuCacheInfo* cpuCacheList = nullptr;
@@ -809,6 +828,7 @@ public:
     void SetParameter( size_t paramIdx, int32_t val );
 
     const decltype(DataBlock::cpuTopology)& GetCpuTopology() const { return m_data.cpuTopology; }
+    const Vector<CpuThreadTopology> &GetTopoCoreInfos() const { return m_data.coreInfos; }
     const CpuThreadTopology* GetThreadTopology( CpuThreadId cpuThread ) const;
     const CpuThreadTopology* GetThreadTopology( CpuCoreId core ) const;
 
@@ -922,10 +942,12 @@ private:
     tracy_force_inline_process MemEvent* ProcessMemAllocNamed( const QueueMemAlloc& ev );
     tracy_force_inline_process MemEvent* ProcessMemFree( const QueueMemFree& ev );
     tracy_force_inline_process MemEvent* ProcessMemFreeNamed( const QueueMemFree& ev );
+    tracy_force_inline_process void ProcessMemDiscard( const QueueMemDiscard& ev );
     tracy_force_inline_process void ProcessMemAllocCallstack( const QueueMemAlloc& ev );
     tracy_force_inline_process void ProcessMemAllocCallstackNamed( const QueueMemAlloc& ev );
     tracy_force_inline_process void ProcessMemFreeCallstack( const QueueMemFree& ev );
     tracy_force_inline_process void ProcessMemFreeCallstackNamed( const QueueMemFree& ev );
+    tracy_force_inline_process void ProcessMemDiscardCallstack( const QueueMemDiscard& ev );
     tracy_force_inline_process void ProcessCallstackSerial();
     tracy_force_inline_process void ProcessCallstack();
     tracy_force_inline_process void ProcessCallstackSample( const QueueCallstackSample& ev );

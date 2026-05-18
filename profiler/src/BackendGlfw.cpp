@@ -1,11 +1,6 @@
-#include "imgui/imgui_impl_glfw.h"
-#include "imgui/imgui_impl_opengl3.h"
-#ifdef __EMSCRIPTEN__
-#  include <GLES2/gl2.h>
-#  include <emscripten/html5.h>
-#else
-#  include "imgui/imgui_impl_opengl3_loader.h"
-#endif
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
+#include <backends/imgui_impl_opengl3_loader.h>
 
 #include <chrono>
 #include <GLFW/glfw3.h>
@@ -22,9 +17,11 @@
 
 static GLFWwindow* s_window;
 static std::function<void()> s_redraw;
+static std::function<void(float)> s_scaleChanged;
 static RunQueue* s_mainThreadTasks;
 static WindowPosition* s_winPos;
 static bool s_iconified;
+static float s_prevScale = -1;
 
 extern tracy::Config s_config;
 
@@ -83,11 +80,34 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
 #  if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 4 )
     glfwWindowHint( GLFW_WIN32_KEYBOARD_MENU, 1 );
 #  endif
+#  if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
+    glfwWindowHint( GLFW_SCALE_TO_MONITOR, 1 );
+#  endif
 #endif
     s_window = glfwCreateWindow( m_winPos.w, m_winPos.h, title, NULL, NULL );
     if( !s_window ) exit( 1 );
 
     glfwSetWindowPos( s_window, m_winPos.x, m_winPos.y );
+
+#  if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
+    // Now that our window is fully created and setup, we will know/get the correct DPI for the correct monitor.
+    // apply our dpi scale to m_winPos (we need to do this since in the size and pos callbacks we will get DPI
+    // scaled values, otherwise they'll be out of sync, and reposition/size the window before finally showing it.
+    // We must do this *after* calling glfwSetWindowPos() once, otherwise windows will just give us the DPI of
+    // the primary monitor, not the DPI of the monitor the window will actually be on.
+    float dpiScale = GetDpiScale();
+    if ( dpiScale > 0.0f )
+    {
+        m_winPos.x *= dpiScale;
+        m_winPos.y *= dpiScale;
+        m_winPos.w *= dpiScale;
+        m_winPos.h *= dpiScale;
+
+        glfwSetWindowPos( s_window, m_winPos.x, m_winPos.y );
+        glfwSetWindowSize( s_window, m_winPos.w, m_winPos.h );
+    }
+#  endif
+
 #if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 2 )
     if( m_winPos.maximize ) glfwMaximizeWindow( s_window );
 #endif
@@ -97,13 +117,10 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
     glfwSetWindowRefreshCallback( s_window, []( GLFWwindow* ) { tracy::s_wasActive = true; s_redraw(); } );
 
     ImGui_ImplGlfw_InitForOpenGL( s_window, true );
-#ifdef __EMSCRIPTEN__
-    ImGui_ImplOpenGL3_Init( "#version 100" );
-#else
     ImGui_ImplOpenGL3_Init( "#version 150" );
-#endif
 
     s_redraw = redraw;
+    s_scaleChanged = scaleChanged;
     s_mainThreadTasks = mainThreadTasks;
     s_winPos = &m_winPos;
     s_iconified = false;
@@ -118,6 +135,20 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
 
 Backend::~Backend()
 {
+#  if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
+    // Make sure we store the unscaled window pos/size in window.position to prevent the
+    // window from moving/resizing when loading the values and creating the window on next startup
+    float dpiScale = GetDpiScale();
+    if ( dpiScale > 0.0f )
+    {
+        float invDpiScale = 1.0f / dpiScale;
+        m_winPos.x *= invDpiScale;
+        m_winPos.y *= invDpiScale;
+        m_winPos.w *= invDpiScale;
+        m_winPos.h *= invDpiScale;
+    }
+#  endif
+
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
 
@@ -133,13 +164,6 @@ void Backend::Show()
 
 void Backend::Run()
 {
-#ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop( []() {
-        glfwPollEvents();
-        s_redraw();
-        s_mainThreadTasks->Run();
-    }, 0, 1 );
-#else
     while( !glfwWindowShouldClose( s_window ) )
     {
         if( s_iconified )
@@ -154,7 +178,6 @@ void Backend::Run()
             s_mainThreadTasks->Run();
         }
     }
-#endif
 }
 
 void Backend::Attention()
@@ -169,6 +192,13 @@ void Backend::Attention()
 
 void Backend::NewFrame( int& w, int& h )
 {
+    const auto scale = GetDpiScale();
+    if( scale != s_prevScale )
+    {
+        s_prevScale = scale;
+        s_scaleChanged( scale );
+    }
+
     glfwGetFramebufferSize( s_window, &w, &h );
     m_w = w;
     m_h = h;
@@ -206,25 +236,11 @@ void Backend::SetTitle( const char* title )
 
 float Backend::GetDpiScale()
 {
-#ifdef __EMSCRIPTEN__
-    return EM_ASM_DOUBLE( { return window.devicePixelRatio; } );
-#elif GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
-    auto monitor = glfwGetWindowMonitor( s_window );
-    if( !monitor ) monitor = glfwGetPrimaryMonitor();
-    if( monitor )
-    {
-        float x, y;
-        glfwGetMonitorContentScale( monitor, &x, &y );
-        return x;
-    }
-#endif
+#if GLFW_VERSION_MAJOR > 3 || ( GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3 )
+    float x, y;
+    glfwGetWindowContentScale( s_window, &x, &y );
+    return x;
+#else
     return 1;
-}
-
-#ifdef __EMSCRIPTEN__
-extern "C" int nativeResize( int width, int height )
-{
-    glfwSetWindowSize( s_window, width, height );
-    return 0;
-}
 #endif
+}

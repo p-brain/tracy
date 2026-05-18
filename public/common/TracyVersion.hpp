@@ -11,16 +11,16 @@ namespace tracy
 // our current offset value!
 //
 // Update the comment when updating the file format!
-// Upstream patch file format version: 1
-// Our current offset from upstream is: 5
+// Upstream patch file format version: 0
+// Our current offset from upstream is: 1
 //
 enum : uint32_t { ForceFileVersionPatchConflict = 0 };
 
 namespace Version
 {
 enum { Major = 0 };
-enum { Minor = 11 };
-enum { Patch = ForceFileVersionPatchConflict + 6 };
+enum { Minor = 12 };
+enum { Patch = ForceFileVersionPatchConflict + 1 };
 }
 }
 

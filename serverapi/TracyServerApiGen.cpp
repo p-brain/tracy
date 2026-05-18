@@ -37,6 +37,8 @@
 
 #   include "../public/common/tracy_lz4hc.cpp"
 
+#   define tracy_zdict_include_relative
+
 #   include "../server/GetMainWindowHandle.cpp"
 #   include "../server/TracyMemory.cpp"
 #   include "../server/TracyMmap.cpp"

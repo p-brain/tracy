@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "TracyColor.hpp"
 #include "TracyImGui.hpp"
 #include "TracyLockHelpers.hpp"
 #include "TracyMouse.hpp"
@@ -345,7 +346,6 @@ void TimelineItemThread::DrawOverlay( const ImVec2& ul, const ImVec2& dr )
     m_view.DrawThreadOverlays( *m_thread, ul, dr );
 }
 
-
 bool TimelineItemThread::PreventScrolling() const
 {
     return (m_trackUiData.preventScroll > 0);
@@ -356,6 +356,21 @@ void TimelineItemThread::DrawUiControls( const TimelineContext &ctx, int start, 
     ViewData::Track& rThreadSettings = m_view.GetViewData().threads[ m_thread->id ];
     m_view.DrawTrackUiControls( ctx, HeaderLabel(), m_maxDepth, m_depth, m_trackUiData, rThreadSettings, start, offset, xOffset );
 }
+
+void TimelineItemThread::DrawExtraPopupItems()
+{
+    if( m_view.GetSelectThread() == m_thread->id )
+    {
+        if( ImGui::MenuItem( ICON_FA_TIMELINE " Unselect in CPU timeline" ) )
+        {
+            m_view.SelectThread( 0 );
+        }
+    }
+    else if( m_view.GetViewData().drawCpuData && ImGui::MenuItem( ICON_FA_TIMELINE " Select in CPU timeline" ) )
+    {
+        m_view.SelectThread( m_thread->id );
+    }
+ }
 
 void TimelineItemThread::DrawFinished()
 {
@@ -1113,8 +1128,8 @@ void TimelineItemThread::PreprocessLocks( const TimelineContext& ctx, const unor
         }
 
         assert( !lockmap.timeline.empty() );
-        const auto &range = lockmap.range[ it->second ];
-        if ( range.start > vEnd || range.end < vStart )
+        const auto& range = lockmap.range[it->second];
+        if( range.start > vEnd || range.end < vStart )
         {
             if ( lockInfoWindow == lockId )
             {
@@ -1354,7 +1369,7 @@ void TimelineItemThread::PreprocessMergedLocks( const TimelineContext &ctx, cons
                        const int64_t l = lhs.beg->ptr->Time();
                        const int64_t r = rhs.beg->ptr->Time();
                        return l < r;
-                   });
+        } );
 
         struct MergeInfo
         {

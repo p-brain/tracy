@@ -49,6 +49,7 @@ private:
     double m_userMax = -1.0;
     int m_bUseFixedMax = 0; // Set to 1 to display plot using user-provided fixed maximum value (defined as int for use with ImGui::RadioButton())
 
+    bool m_rightEnd;
     TimelineResizeBar m_resizeBar;
 };
 
